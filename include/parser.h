@@ -33,6 +33,7 @@ enum class NodeType {
     FILE_WRITE_STATEMENT, // 文件写入语句
     FILE_APPEND_STATEMENT, // 文件追加语句
     IMPORT_STATEMENT,    // 导入语句
+    SYSTEM_CMD_STATEMENT, // 系统命令行语句
     STRUCT_DEF,          // 结构体定义
     STRUCT_MEMBER_ACCESS, // 结构体成员访问
     STRUCT_MEMBER_ASSIGNMENT // 结构体成员赋值
@@ -197,6 +198,15 @@ public:
         : ASTNode(NodeType::IMPORT_STATEMENT, line, column), filePath(filePath) {}
 };
 
+// 系统命令行语句节点
+class SystemCmdStatementNode : public ASTNode {
+public:
+    std::unique_ptr<ASTNode> commandExpr;
+    
+    SystemCmdStatementNode(std::unique_ptr<ASTNode> commandExpr, int line, int column)
+        : ASTNode(NodeType::SYSTEM_CMD_STATEMENT, line, column), commandExpr(std::move(commandExpr)) {}
+};
+
 // 语句列表节点
 class StatementListNode : public ASTNode {
 public:
@@ -354,7 +364,6 @@ private:
     bool isAtEnd() const;
     Token consume(TokenType type, const std::string& message);
     
-    std::unique_ptr<ASTNode> parseProgram();
     std::unique_ptr<ASTNode> parseStatement();
     std::unique_ptr<ASTNode> parseVariableDef();
     std::unique_ptr<ASTNode> parseVariableDef(bool consumeSemicolon);
@@ -380,6 +389,8 @@ private:
     std::unique_ptr<ASTNode> parseFileWriteStatement();
     std::unique_ptr<ASTNode> parseFileAppendStatement();
     std::unique_ptr<ASTNode> parseImportStatement();
+    std::unique_ptr<ASTNode> parseSystemCmdStatement();
+    std::unique_ptr<ASTNode> parseStructDef();
     std::unique_ptr<ASTNode> parseStructMemberAccess();
     
 public:

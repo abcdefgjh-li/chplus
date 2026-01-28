@@ -5,6 +5,8 @@
 #include <sstream>
 #include <cmath>
 #include <filesystem>
+#include <cstdlib>
+#include <chrono>
 
 // 简单的类型推断函数
 std::string inferType(const std::string& value) {
@@ -265,7 +267,7 @@ Interpreter::~Interpreter() {
 
 // 运行程序
 void Interpreter::run() {
-    // 首先处理所有全局声明（函数定义和结构体定义）
+    // 首先处理所有全局声明（函数定义、结构体定义、导入语句）
     for (const auto& stmt : program->statements) {
         if (stmt->type == NodeType::FUNCTION_DEF) {
             FunctionDefNode* func = static_cast<FunctionDefNode*>(stmt.get());
@@ -273,6 +275,14 @@ void Interpreter::run() {
         } else if (stmt->type == NodeType::STRUCT_DEF) {
             StructDefNode* structDef = static_cast<StructDefNode*>(stmt.get());
             globalScope->defineStruct(structDef->structName, structDef->members);
+        } else if (stmt->type == NodeType::IMPORT_STATEMENT) {
+            // 处理导入语句
+            ImportStatementNode* importStmt = static_cast<ImportStatementNode*>(stmt.get());
+            importFile(importStmt->filePath, stmt->line);
+        } else if (stmt->type == NodeType::SYSTEM_CMD_STATEMENT) {
+            // 处理全局系统命令语句
+            SystemCmdStatementNode* cmdStmt = static_cast<SystemCmdStatementNode*>(stmt.get());
+            executeSystemCommand(cmdStmt->commandExpr.get(), globalScope, stmt->line);
         }
     }
     
@@ -623,6 +633,13 @@ void Interpreter::executeStatement(ASTNode* node, SymbolTable* scope, const std:
             
             // 读取并解析导入的文件
             importFile(importStmt->filePath, node->line);
+            break;
+        }
+        case NodeType::SYSTEM_CMD_STATEMENT: {
+            SystemCmdStatementNode* cmdStmt = static_cast<SystemCmdStatementNode*>(node);
+            
+            // 执行系统命令
+            executeSystemCommand(cmdStmt->commandExpr.get(), scope, node->line);
             break;
         }
         case NodeType::ASSIGNMENT: {
@@ -1168,11 +1185,11 @@ std::string Interpreter::evaluate(ASTNode* node, SymbolTable* scope) {
             }
             
             // 逻辑运算符处理
-            if (binExpr->op == "&&") {
+            if (binExpr->op == "&&" || binExpr->op == "和") {
                 bool leftTrue = (left == "true" || left == "真" || (leftIsNumber && leftValue != 0));
                 bool rightTrue = (right == "true" || right == "真" || (rightIsNumber && rightValue != 0));
                 return (leftTrue && rightTrue) ? "真" : "假";
-            } else if (binExpr->op == "||") {
+            } else if (binExpr->op == "||" || binExpr->op == "或") {
                 bool leftTrue = (left == "true" || left == "真" || (leftIsNumber && leftValue != 0));
                 bool rightTrue = (right == "true" || right == "真" || (rightIsNumber && rightValue != 0));
                 return (leftTrue || rightTrue) ? "真" : "假";
@@ -1351,18 +1368,32 @@ void Interpreter::importFile(const std::string& filePath, int line) {
         std::vector<Token> tokens = lexer.tokenize();
         
         Parser parser(tokens);
-        auto importedProgram = parser.parseProgram();
+        auto importedProgram = parser.parse();  // 使用parse()而不是parseProgram()
+        
+        // 将ASTNode转换为ProgramNode以访问statements
+        ProgramNode* programNode = static_cast<ProgramNode*>(importedProgram.get());
         
         // 执行导入的程序（不运行主函数）
-        for (const auto& stmt : importedProgram->statements) {
+        for (const auto& stmt : programNode->statements) {
             if (stmt->type == NodeType::VARIABLE_DEF) {
-                executeStatement(stmt.get(), globalScope);
+                VariableDefNode* varDef = static_cast<VariableDefNode*>(stmt.get());
+                std::string value = "";
+                if (varDef->initializer) {
+                    // 避免在导入时执行函数调用或复杂表达式
+                    throw std::runtime_error("导入文件中的变量不能有初始化表达式 在第 " + std::to_string(stmt->line) + " 行");
+                }
+                globalScope->defineVariable(varDef->name, varDef->type, value, stmt->line);
             } else if (stmt->type == NodeType::FUNCTION_DEF) {
                 // 执行函数定义，添加到全局符号表
-                executeStatement(stmt.get(), globalScope);
+                FunctionDefNode* funcDef = static_cast<FunctionDefNode*>(stmt.get());
+                globalScope->defineFunction(funcDef);
             } else if (stmt->type == NodeType::STRUCT_DEF) {
                 // 执行结构体定义，添加到全局符号表
-                executeStatement(stmt.get(), globalScope);
+                StructDefNode* structDef = static_cast<StructDefNode*>(stmt.get());
+                globalScope->defineStruct(structDef->structName, structDef->members);
+            } else if (stmt->type == NodeType::SYSTEM_CMD_STATEMENT) {
+                // 执行系统命令行语句
+                executeSystemCommand(static_cast<SystemCmdStatementNode*>(stmt.get())->commandExpr.get(), globalScope, stmt->line);
             } else if (stmt->type == NodeType::IMPORT_STATEMENT) {
                 // 处理嵌套导入
                 ImportStatementNode* nestedImport = static_cast<ImportStatementNode*>(stmt.get());
@@ -1375,5 +1406,27 @@ void Interpreter::importFile(const std::string& filePath, int line) {
         // 如果导入失败，从已导入列表中移除
         importedFiles.erase(filePath);
         throw std::runtime_error("导入文件失败: " + filePath + " - " + e.what() + " 在第 " + std::to_string(line) + " 行");
+    }
+}
+
+// 执行系统命令的实现
+void Interpreter::executeSystemCommand(ASTNode* commandNode, SymbolTable* scope, int line) {
+    try {
+        // 首先计算命令表达式的值
+        std::string command = evaluate(commandNode, scope);
+        
+        // 直接使用system()执行命令
+        int result = system(command.c_str());
+        
+        // 只在出错时输出信息
+        if (result == -1) {
+            std::cout << "系统命令执行失败: " << command << std::endl;
+        } else if (result != 0) {
+            std::cout << "系统命令执行完成 (返回码: " << result << ")" << std::endl;
+        }
+        // 成功时不输出任何信息
+        
+    } catch (const std::exception& e) {
+        throw std::runtime_error(std::string("执行系统命令失败: ") + e.what() + " 在第 " + std::to_string(line) + " 行");
     }
 }

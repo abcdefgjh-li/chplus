@@ -34,6 +34,14 @@ enum class TokenType {
     // 模块导入关键字
     IMPORT,          // 导入
     
+    // 系统命令关键字
+    SYSTEM_CMD,      // 系统命令行
+    
+    // 逻辑运算符
+    LOGICAL_AND,     // 和 (&&)
+    LOGICAL_OR,      // 或 (||)
+    LOGICAL_NOT,     // 逻辑非 (!)
+    
     // 标识符
     IDENTIFIER,      // 标识符
     
@@ -57,9 +65,6 @@ enum class TokenType {
     GREATER_EQUAL,   // >=
     EQUAL,           // ==
     NOT_EQUAL,       // !=
-    LOGICAL_AND,     // &&
-    LOGICAL_OR,      // ||
-    LOGICAL_NOT,     // !
     
     // 分隔符
     LPAREN,          // (

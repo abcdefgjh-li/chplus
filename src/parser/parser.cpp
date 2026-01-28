@@ -74,7 +74,7 @@ std::unique_ptr<ProgramNode> Parser::parse() {
 }
 
 // 解析程序
-std::unique_ptr<ASTNode> Parser::parseProgram() {
+std::unique_ptr<ProgramNode> Parser::parseProgram() {
     auto program = std::make_unique<ProgramNode>(1, 1);
     
     while (!isAtEnd()) {
@@ -124,6 +124,9 @@ std::unique_ptr<ASTNode> Parser::parseStatement() {
     }
     if (match(TokenType::IMPORT)) {
         return parseImportStatement();
+    }
+    if (match(TokenType::SYSTEM_CMD)) {
+        return parseSystemCmdStatement();
     }
     if (match(TokenType::FILE_READ)) {
         return parseFileReadStatement();
@@ -924,6 +927,20 @@ std::unique_ptr<ASTNode> Parser::parseImportStatement() {
     std::string filePath = literal->value;
     
     return std::make_unique<ImportStatementNode>(filePath, line, column);
+}
+
+// 解析系统命令行语句
+std::unique_ptr<ASTNode> Parser::parseSystemCmdStatement() {
+    int line = previous().line;
+    int column = previous().column;
+    
+    consume(TokenType::LPAREN, "系统命令行语句必须以 '(' 开始");
+    auto commandExpr = parseExpression();
+    consume(TokenType::RPAREN, "系统命令行语句必须以 ')' 结束");
+    consume(TokenType::SEMICOLON, "语句必须以分号结束");
+    
+    // 允许任意表达式作为命令，可以动态构建命令字符串
+    return std::make_unique<SystemCmdStatementNode>(std::move(commandExpr), line, column);
 }
 
 // 解析结构体定义

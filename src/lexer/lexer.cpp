@@ -26,7 +26,11 @@ static std::map<std::string, TokenType> keywords = {
     {"文件写入", TokenType::FILE_WRITE},
     {"文件追加", TokenType::FILE_APPEND},
     {"导入", TokenType::IMPORT},
-    {"数组", TokenType::ARRAY}
+    {"数组", TokenType::ARRAY},
+    {"系统命令行", TokenType::SYSTEM_CMD},
+    {"和", TokenType::LOGICAL_AND},
+    {"或", TokenType::LOGICAL_OR},
+    {"或者", TokenType::LOGICAL_OR}
 };
 
 // 构造函数
