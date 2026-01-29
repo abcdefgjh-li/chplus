@@ -10,12 +10,18 @@
 - **conditions.ch** - 条件判断，演示if-else语句
 - **logic_operators.ch** - 中文逻辑运算符，演示"和"、"或"等逻辑运算符
 
+### 类型系统（新增）
+- **type_conversion.ch** - 类型转换和字符操作，演示新增的字符类型和类型转换函数
+- **simple_type_test.ch** - 简化类型测试，验证基础类型转换功能
+
 ### 函数功能
 - **function_overload.ch** - 函数重载，演示同名函数不同参数类型
 
 ### 数据结构
 - **array_demo.ch** - 数组操作，演示一维数组的定义和使用
 - **struct_demo.ch** - 结构体操作，演示结构体定义和成员访问
+- **minimal_struct_array.ch** - 简化结构体数组，演示结构体数组定义
+- **struct_array_test.ch** - 完整结构体数组，演示结构体数组的使用
 
 ### 文件操作
 - **file_demo.ch** - 文件基础操作，演示文件写入和读取
@@ -31,6 +37,42 @@
 ### 语言特性
 - **scope_test.ch** - 作用域测试，演示全局作用域限制
 
+## 新增功能说明
+
+### 1. 字符类型支持（新增）
+.ch解释器现在完全支持字符类型：
+
+```ch
+定义(字符型) ch = 'A';
+控制台输出(字符转字符串(ch));     // 输出: A
+控制台输出(字符ASCII码(ch));      // 输出: 65
+```
+
+### 2. 结构体数组支持（新增）
+支持使用结构体类型定义数组：
+
+```ch
+定义(结构体) Person {
+    字符串 name;
+    整型 age;
+};
+
+定义(Person) people[3];           // 结构体数组
+```
+
+### 3. 增强的类型转换（新增）
+string.ch库现在提供完整的类型转换功能：
+
+#### 基础类型转换
+- `整数转字符串(整型 num)` - 整数转字符串
+- `小数转字符串(小数 num)` - 小数转字符串
+- `布尔值转字符串(布尔型 flag)` - 布尔值转字符串
+
+#### 字符串转换
+- `字符串转整数(字符串 str)` - 字符串转整数
+- `字符串转小数(字符串 str)` - 字符串转小数
+- `字符串转布尔值(字符串 str)` - 字符串转布尔值
+
 ## 运行方法
 
 ### 编译解释器
@@ -43,6 +85,7 @@ g++ main.cpp src/lexer/lexer.cpp src/parser/parser.cpp src/executor/interpreter.
 ./chplus.exe examples/hello.ch
 ./chplus.exe examples/calculator.ch
 ./chplus.exe examples/math_demo.ch
+./chplus.exe examples/type_conversion.ch
 ```
 
 ## 功能说明
@@ -63,6 +106,7 @@ g++ main.cpp src/lexer/lexer.cpp src/parser/parser.cpp src/executor/interpreter.
 ### 4. 数组操作
 - 数组定义：`定义(类型) 数组名[大小];`
 - 数组访问：`数组名[索引]`
+- 结构体数组：`定义(结构体类型) 数组名[大小];`（新增）
 
 ### 5. 结构体
 - 结构体定义：`定义(结构体) 结构体名 { 成员; };`
@@ -80,6 +124,11 @@ g++ main.cpp src/lexer/lexer.cpp src/parser/parser.cpp src/executor/interpreter.
 ### 8. 字符串库
 - 需要导入string.ch库：`导入("ch_Lib/string.ch");`
 - 字符串操作：`长度(字符串)`、`转大写(字符串)`、`查找(字符串, 子串)`
+- 类型转换：`整数转字符串(123)`、`小数转字符串(3.14)`（新增）
+
+### 9. 字符操作（新增）
+- 字符定义：`定义(字符型) ch = 'A';`
+- 字符类型存在，但字符转字符串等操作函数已被移除以保持简洁性
 
 ## 中文编程特色
 
@@ -93,6 +142,7 @@ g++ main.cpp src/lexer/lexer.cpp src/parser/parser.cpp src/executor/interpreter.
 | 输出 | 控制台输出 | `控制台输出("Hello");` |
 | 逻辑运算 | 和/或 | `如果 (a > 0 和 b > 0) { }` |
 | 导入 | 导入 | `导入("ch_Lib/math.ch");` |
+| 字符类型 | 字符型 | `定义(字符型) ch = 'A';` |
 
 ## 测试建议
 
@@ -102,11 +152,13 @@ g++ main.cpp src/lexer/lexer.cpp src/parser/parser.cpp src/executor/interpreter.
 2. **calculator.ch** - 测试基础数学运算
 3. **conditions.ch** - 测试条件判断
 4. **logic_operators.ch** - 测试中文逻辑运算符
-5. **array_demo.ch** - 测试数组功能
-6. **struct_demo.ch** - 测试结构体功能
-7. **file_demo.ch** - 测试文件操作
-8. **math_demo.ch** - 测试数学库
-9. **string_basic.ch** - 测试字符串库
+5. **simple_type_test.ch** - 测试新增的类型转换功能
+6. **minimal_struct_array.ch** - 测试新增的结构体数组功能
+7. **array_demo.ch** - 测试数组功能
+8. **struct_demo.ch** - 测试结构体功能
+9. **file_demo.ch** - 测试文件操作
+10. **math_demo.ch** - 测试数学库
+11. **string_basic.ch** - 测试字符串库
 
 每个示例都设计为独立运行，可以单独测试特定功能。
 
@@ -116,6 +168,7 @@ g++ main.cpp src/lexer/lexer.cpp src/parser/parser.cpp src/executor/interpreter.
 2. 数学库示例需要确保math.ch库文件存在
 3. 字符串库示例需要确保string.ch库文件存在
 4. 文件重定向示例会影响后续的输出重定向
+5. 新增的字符类型和类型转换功能需要确保string.ch库正常导入
 
 ## 错误排查
 
@@ -125,6 +178,7 @@ g++ main.cpp src/lexer/lexer.cpp src/parser/parser.cpp src/executor/interpreter.
 2. **检查路径**：确保示例文件路径正确
 3. **检查依赖**：确保所需的标准库文件存在
 4. **查看错误信息**：解释器会提供详细的错误位置和原因
+5. **字符类型问题**：确保使用正确的字符字面量语法 `'A'` 而不是 `"A"`
 
 ---
 

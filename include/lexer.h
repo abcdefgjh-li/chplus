@@ -11,6 +11,7 @@ enum class TokenType {
     DEFINE,          // 定义
     INTEGER,         // 整型
     STRING,          // 字符串
+    CHAR,            // 字符型
     VOID,            // 空类型
     MAIN,            // 主函数
     IF,              // 如果
@@ -49,6 +50,8 @@ enum class TokenType {
     INTEGER_LITERAL, // 整数字面量
     NUMBER = INTEGER_LITERAL, // 兼容别名
     STRING_LITERAL,  // 字符串字面量
+    CHAR_LITERAL,   // 字符字面量
+    DOUBLE_LITERAL,   // 小数字面量
     BOOLEAN_LITERAL, // 布尔字面量
     
     // 运算符
@@ -211,6 +214,7 @@ private:
     Token identifier();
     Token number();
     Token string();
+    Token character();
     
 public:
     Lexer(const std::string& source);

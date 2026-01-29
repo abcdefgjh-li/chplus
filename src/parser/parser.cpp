@@ -158,6 +158,8 @@ std::unique_ptr<ASTNode> Parser::parseVariableDef(bool consumeSemicolon) {
         type = "整型";
     } else if (match(TokenType::STRING)) {
         type = "字符串";
+    } else if (match(TokenType::CHAR)) {
+        type = "字符型";
     } else if (match(TokenType::VOID)) {
         type = "空类型";
     } else if (match(TokenType::DOUBLE)) {
@@ -170,10 +172,15 @@ std::unique_ptr<ASTNode> Parser::parseVariableDef(bool consumeSemicolon) {
             type = "整型数组";
         } else if (match(TokenType::STRING)) {
             type = "字符串数组";
+        } else if (match(TokenType::CHAR)) {
+            type = "字符型数组";
         } else if (match(TokenType::DOUBLE)) {
             type = "小数数组";
         } else if (match(TokenType::BOOLEAN)) {
             type = "布尔型数组";
+        } else if (match(TokenType::IDENTIFIER)) {
+            // 结构体数组类型，标识符就是结构体类型名
+            type = previous().value + "数组";
         } else {
             throw std::runtime_error("未知数组类型 在第 " + std::to_string(peek().line) + " 行");
         }
@@ -593,6 +600,9 @@ std::unique_ptr<ASTNode> Parser::parsePrimary() {
     if (match(TokenType::STRING_LITERAL)) {
         return std::make_unique<LiteralNode>(previous().value, "字符串", previous().line, previous().column);
     }
+    if (match(TokenType::CHAR_LITERAL)) {
+        return std::make_unique<LiteralNode>(previous().value, "字符型", previous().line, previous().column);
+    }
     if (match(TokenType::BOOLEAN_LITERAL)) {
         return std::make_unique<LiteralNode>(previous().value, "布尔型", previous().line, previous().column);
     }
@@ -686,6 +696,11 @@ std::unique_ptr<ASTNode> Parser::parsePrimary() {
         auto expr = parseExpression();
         consume(TokenType::RPAREN, "表达式必须以 ')' 结束");
         return expr;
+    }
+    
+    // 检查是否是系统命令行表达式
+    if (match(TokenType::SYSTEM_CMD)) {
+        return parseSystemCmdExpression();
     }
     
     throw std::runtime_error("无效的表达式 在第 " + std::to_string(peek().line) + " 行");
@@ -941,6 +956,19 @@ std::unique_ptr<ASTNode> Parser::parseSystemCmdStatement() {
     
     // 允许任意表达式作为命令，可以动态构建命令字符串
     return std::make_unique<SystemCmdStatementNode>(std::move(commandExpr), line, column);
+}
+
+// 解析系统命令行表达式（返回命令执行结果）
+std::unique_ptr<ASTNode> Parser::parseSystemCmdExpression() {
+    int line = previous().line;
+    int column = previous().column;
+    
+    consume(TokenType::LPAREN, "系统命令行表达式必须以 '(' 开始");
+    auto commandExpr = parseExpression();
+    consume(TokenType::RPAREN, "系统命令行表达式必须以 ')' 结束");
+    
+    // 返回系统命令行表达式节点
+    return std::make_unique<SystemCmdExpressionNode>(std::move(commandExpr), line, column);
 }
 
 // 解析结构体定义

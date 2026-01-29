@@ -34,6 +34,7 @@ enum class NodeType {
     FILE_APPEND_STATEMENT, // 文件追加语句
     IMPORT_STATEMENT,    // 导入语句
     SYSTEM_CMD_STATEMENT, // 系统命令行语句
+    SYSTEM_CMD_EXPRESSION, // 系统命令行表达式
     STRUCT_DEF,          // 结构体定义
     STRUCT_MEMBER_ACCESS, // 结构体成员访问
     STRUCT_MEMBER_ASSIGNMENT // 结构体成员赋值
@@ -205,6 +206,15 @@ public:
     
     SystemCmdStatementNode(std::unique_ptr<ASTNode> commandExpr, int line, int column)
         : ASTNode(NodeType::SYSTEM_CMD_STATEMENT, line, column), commandExpr(std::move(commandExpr)) {}
+};
+
+// 系统命令行表达式节点（返回命令结果）
+class SystemCmdExpressionNode : public ASTNode {
+public:
+    std::unique_ptr<ASTNode> commandExpr;
+    
+    SystemCmdExpressionNode(std::unique_ptr<ASTNode> commandExpr, int line, int column)
+        : ASTNode(NodeType::SYSTEM_CMD_EXPRESSION, line, column), commandExpr(std::move(commandExpr)) {}
 };
 
 // 语句列表节点
@@ -390,6 +400,7 @@ private:
     std::unique_ptr<ASTNode> parseFileAppendStatement();
     std::unique_ptr<ASTNode> parseImportStatement();
     std::unique_ptr<ASTNode> parseSystemCmdStatement();
+    std::unique_ptr<ASTNode> parseSystemCmdExpression();
     std::unique_ptr<ASTNode> parseStructDef();
     std::unique_ptr<ASTNode> parseStructMemberAccess();
     

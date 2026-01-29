@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <cstdlib>
 #include <chrono>
+#include <cctype>
 
 // 简单的类型推断函数
 std::string inferType(const std::string& value) {
@@ -796,6 +797,107 @@ std::string Interpreter::evaluate(ASTNode* node, SymbolTable* scope) {
             FunctionCallNode* funcCall = static_cast<FunctionCallNode*>(node);
             std::string functionName = funcCall->functionName;
             
+            // 检查内置函数
+            if (functionName == "长度") {
+                if (funcCall->arguments.size() != 1) {
+                    throw std::runtime_error("长度函数需要一个参数 在第 " + std::to_string(node->line) + " 行");
+                }
+                std::string strValue = evaluate(funcCall->arguments[0].get(), scope);
+                return std::to_string(strValue.length());
+            }
+            
+            if (functionName == "子串") {
+                if (funcCall->arguments.size() != 3) {
+                    throw std::runtime_error("子串函数需要3个参数: 字符串, 开始位置, 长度 在第 " + std::to_string(node->line) + " 行");
+                }
+                std::string strValue = evaluate(funcCall->arguments[0].get(), scope);
+                int start = std::stoi(evaluate(funcCall->arguments[1].get(), scope));
+                int length = std::stoi(evaluate(funcCall->arguments[2].get(), scope));
+                
+                if (start < 0 || start >= static_cast<int>(strValue.length()) || length <= 0) {
+                    return "";
+                }
+                return strValue.substr(start, length);
+            }
+            
+            if (functionName == "查找") {
+                if (funcCall->arguments.size() != 2) {
+                    throw std::runtime_error("查找函数需要2个参数: 字符串, 子字符串 在第 " + std::to_string(node->line) + " 行");
+                }
+                std::string strValue = evaluate(funcCall->arguments[0].get(), scope);
+                std::string substr = evaluate(funcCall->arguments[1].get(), scope);
+                
+                size_t pos = strValue.find(substr);
+                if (pos == std::string::npos) {
+                    return "-1";
+                }
+                return std::to_string(pos);
+            }
+            
+            if (functionName == "转大写") {
+                if (funcCall->arguments.size() != 1) {
+                    throw std::runtime_error("转大写函数需要一个参数 在第 " + std::to_string(node->line) + " 行");
+                }
+                std::string strValue = evaluate(funcCall->arguments[0].get(), scope);
+                std::string result = strValue;
+                for (char& c : result) {
+                    c = std::toupper(c);
+                }
+                return result;
+            }
+            
+            if (functionName == "转小写") {
+                if (funcCall->arguments.size() != 1) {
+                    throw std::runtime_error("转小写函数需要一个参数 在第 " + std::to_string(node->line) + " 行");
+                }
+                std::string strValue = evaluate(funcCall->arguments[0].get(), scope);
+                std::string result = strValue;
+                for (char& c : result) {
+                    c = std::tolower(c);
+                }
+                return result;
+            }
+            
+            if (functionName == "去空白") {
+                if (funcCall->arguments.size() != 1) {
+                    throw std::runtime_error("去空白函数需要一个参数 在第 " + std::to_string(node->line) + " 行");
+                }
+                std::string strValue = evaluate(funcCall->arguments[0].get(), scope);
+                
+                // 移除首尾空白
+                size_t start = 0;
+                while (start < strValue.length() && std::isspace(strValue[start])) {
+                    start++;
+                }
+                size_t end = strValue.length();
+                while (end > start && std::isspace(strValue[end - 1])) {
+                    end--;
+                }
+                return strValue.substr(start, end - start);
+            }
+            
+            if (functionName == "重复") {
+                if (funcCall->arguments.size() != 2) {
+                    throw std::runtime_error("重复函数需要2个参数: 字符串, 次数 在第 " + std::to_string(node->line) + " 行");
+                }
+                std::string strValue = evaluate(funcCall->arguments[0].get(), scope);
+                int times = std::stoi(evaluate(funcCall->arguments[1].get(), scope));
+                
+                std::string result;
+                for (int i = 0; i < times; i++) {
+                    result += strValue;
+                }
+                return result;
+            }
+            
+            if (functionName == "整数转字符串") {
+                if (funcCall->arguments.size() != 1) {
+                    throw std::runtime_error("整数转字符串函数需要一个参数 在第 " + std::to_string(node->line) + " 行");
+                }
+                std::string intValue = evaluate(funcCall->arguments[0].get(), scope);
+                return intValue;
+            }
+            
             // 检查函数是否已定义
             if (!scope->hasFunction(functionName)) {
                 throw std::runtime_error("函数未定义: " + functionName + " 在第 " + std::to_string(node->line) + " 行");
@@ -1336,6 +1438,12 @@ std::string Interpreter::evaluate(ASTNode* node, SymbolTable* scope) {
             }
             return value;
         }
+        case NodeType::SYSTEM_CMD_EXPRESSION: {
+            // 执行系统命令行表达式，返回命令执行结果
+            SystemCmdExpressionNode* cmdExpr = static_cast<SystemCmdExpressionNode*>(node);
+            std::string result = executeSystemCommandExpression(cmdExpr->commandExpr.get(), scope, node->line);
+            return result;
+        }
         default:
             throw std::runtime_error("无法计算的表达式类型 在第 " + std::to_string(node->line) + " 行");
     }
@@ -1429,4 +1537,51 @@ void Interpreter::executeSystemCommand(ASTNode* commandNode, SymbolTable* scope,
     } catch (const std::exception& e) {
         throw std::runtime_error(std::string("执行系统命令失败: ") + e.what() + " 在第 " + std::to_string(line) + " 行");
     }
+}
+
+// 执行系统命令行表达式（返回命令结果）
+std::string Interpreter::executeSystemCommandExpression(ASTNode* commandNode, SymbolTable* scope, int line) {
+    try {
+        // 首先计算命令表达式的值
+        std::string command = evaluate(commandNode, scope);
+        
+        // 使用管道执行命令并获取输出
+        std::string result = executeCommandWithOutput(command);
+        
+        // 返回命令执行结果
+        return result;
+        
+    } catch (const std::exception& e) {
+        throw std::runtime_error(std::string("执行系统命令表达式失败: ") + e.what() + " 在第 " + std::to_string(line) + " 行");
+    }
+}
+
+// 使用管道执行命令并获取输出
+std::string Interpreter::executeCommandWithOutput(const std::string& command) {
+    std::string result;
+    
+    // 在Windows上使用 _popen，在Unix/Linux上使用 popen
+    #ifdef _WIN32
+        FILE* pipe = _popen(command.c_str(), "r");
+    #else
+        FILE* pipe = popen(command.c_str(), "r");
+    #endif
+    
+    if (!pipe) {
+        return "命令执行失败";
+    }
+    
+    char buffer[256];
+    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+        result += buffer;
+    }
+    
+    // 清理管道
+    #ifdef _WIN32
+        _pclose(pipe);
+    #else
+        pclose(pipe);
+    #endif
+    
+    return result;
 }

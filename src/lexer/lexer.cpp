@@ -7,6 +7,7 @@ static std::map<std::string, TokenType> keywords = {
     {"定义", TokenType::DEFINE},
     {"整型", TokenType::INTEGER},
     {"字符串", TokenType::STRING},
+    {"字符型", TokenType::CHAR},
     {"空类型", TokenType::VOID},
     {"主函数", TokenType::MAIN},
     {"如果", TokenType::IF},
@@ -182,6 +183,56 @@ Token Lexer::string() {
     return Token(TokenType::STRING_LITERAL, result, startLine, startColumn);
 }
 
+// 解析字符
+Token Lexer::character() {
+    size_t start = position;
+    int startLine = line;
+    int startColumn = column;
+    
+    advance(); // 跳过开始的单引号
+    
+    std::string result = "";
+    
+    if (position < source.length() && source[position] != '\'') {
+        // 处理转义字符
+        if (source[position] == '\\') {
+            advance(); // 跳过反斜杠
+            if (position < source.length()) {
+                switch (source[position]) {
+                    case 'n':
+                        result += '\n';
+                        break;
+                    case 't':
+                        result += '\t';
+                        break;
+                    case 'r':
+                        result += '\r';
+                        break;
+                    case '\\':
+                        result += '\\';
+                        break;
+                    case '\'':
+                        result += '\'';
+                        break;
+                    default:
+                        result += source[position];
+                        break;
+                }
+                advance();
+            }
+        } else {
+            result += source[position];
+            advance();
+        }
+    }
+    
+    if (position < source.length() && source[position] == '\'') {
+        advance(); // 跳过结束的单引号
+    }
+    
+    return Token(TokenType::CHAR_LITERAL, result, startLine, startColumn);
+}
+
 // 词法分析主函数
 std::vector<Token> Lexer::tokenize() {
     std::vector<Token> tokens;
@@ -202,6 +253,10 @@ std::vector<Token> Lexer::tokenize() {
         // 处理字符串
         else if (c == '"') {
             tokens.push_back(string());
+        }
+        // 处理字符
+        else if (c == '\'') {
+            tokens.push_back(character());
         }
         // 处理标识符或关键字
         else if (std::isalpha(static_cast<unsigned char>(c)) || c == '_' || 

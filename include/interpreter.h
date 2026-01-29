@@ -66,6 +66,8 @@ private:
     void executeStatement(ASTNode* node, SymbolTable* scope, const std::string& expectedReturnType = "");
     void importFile(const std::string& filePath, int line);
     void executeSystemCommand(ASTNode* commandNode, SymbolTable* scope, int line);
+    std::string executeSystemCommandExpression(ASTNode* commandNode, SymbolTable* scope, int line);
+    std::string executeCommandWithOutput(const std::string& command);
     
 public:
     Interpreter(std::unique_ptr<ProgramNode> program);
