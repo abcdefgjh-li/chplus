@@ -1042,6 +1042,9 @@ std::unique_ptr<ASTNode> Parser::parseStructDefinition(int line, int column) {
 
 // 解析函数定义的通用处理
 std::unique_ptr<ASTNode> Parser::parseFunctionDefCommon(const std::string& type, const std::string& name, int line, int column) {
+    // 调试信息
+    std::cout << "[解析器调试] 解析函数定义: " << name << "(" << std::endl;
+    
     // 解析参数列表
     std::vector<std::pair<std::string, std::string>> params;
     if (!match(TokenType::RPAREN)) {

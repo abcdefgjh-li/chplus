@@ -4,11 +4,14 @@
 #include <fstream>
 #include <sstream>
 #include <cmath>
-#include <filesystem>
 #include <cstdlib>
 #include <chrono>
 #include <cctype>
 #include <cstring>
+#include <stdio.h>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 // 简单的类型推断函数
 std::string inferType(const std::string& value) {
@@ -123,6 +126,9 @@ void SymbolTable::defineFunction(FunctionDefNode* function) {
 FunctionDefNode* SymbolTable::getFunction(const std::string& name, const std::vector<std::string>& argTypes, int line) const {
     auto it = functions.find(name);
     if (it != functions.end()) {
+        // 调试信息：显示符号表中的函数定义
+        std::cout << "[调试] 符号表中有 " << it->second.size() << " 个 " << name << " 函数定义" << std::endl;
+        
         // 查找匹配的函数定义
         for (const auto& func : it->second) {
             std::vector<std::string> paramTypes;
@@ -130,7 +136,16 @@ FunctionDefNode* SymbolTable::getFunction(const std::string& name, const std::ve
                 paramTypes.push_back(param.first);
             }
             
+            // 调试信息：显示每个函数的参数类型
+            std::cout << "[调试] 检查函数: " << name << "(";
+            for (size_t i = 0; i < paramTypes.size(); ++i) {
+                if (i > 0) std::cout << ", ";
+                std::cout << paramTypes[i];
+            }
+            std::cout << ")" << std::endl;
+            
             if (paramTypes == argTypes) {
+                std::cout << "[调试] 找到匹配的函数定义!" << std::endl;
                 return func;
             }
         }
@@ -1131,11 +1146,33 @@ std::string Interpreter::evaluate(ASTNode* node, SymbolTable* scope) {
             for (const auto& argNode : funcCall->arguments) {
                 std::string argValue = evaluate(argNode.get(), scope);
                 argumentValues.push_back(argValue);
-                // 简单的类型推断（基于值的格式）
-                argumentTypes.push_back(inferType(argValue));
+                
+                // 改进的类型推断：优先使用变量的声明类型
+                if (argNode->type == NodeType::IDENTIFIER) {
+                    // 如果是变量引用，使用变量的声明类型
+                    IdentifierNode* ident = static_cast<IdentifierNode*>(argNode.get());
+                    if (scope->hasVariable(ident->name)) {
+                        std::string varType = scope->getVariableType(ident->name);
+                        argumentTypes.push_back(varType);
+                    } else {
+                        // 如果变量不存在，使用值的类型推断
+                        argumentTypes.push_back(inferType(argValue));
+                    }
+                } else {
+                    // 对于字面量等其他表达式，使用值的类型推断
+                    argumentTypes.push_back(inferType(argValue));
+                }
             }
             
             // 获取匹配的函数定义
+            
+            // 调试信息：显示函数名和参数类型
+            std::cout << "[调试] 查找函数: " << functionName << "(";
+            for (size_t i = 0; i < argumentTypes.size(); ++i) {
+                if (i > 0) std::cout << ", ";
+                std::cout << argumentTypes[i];
+            }
+            std::cout << ")" << std::endl;
             
             FunctionDefNode* funcDef = scope->getFunction(functionName, argumentTypes, node->line);
             
@@ -2041,26 +2078,83 @@ std::string Interpreter::executeSystemCommandExpression(ASTNode* commandNode, Sy
 std::string Interpreter::executeCommandWithOutput(const std::string& command) {
     std::string result;
     
-    // 在Windows上使用 _popen，在Unix/Linux上使用 popen
+    // 在Windows上使用CreateProcess执行命令
     #ifdef _WIN32
-        FILE* pipe = _popen(command.c_str(), "r");
+        SECURITY_ATTRIBUTES saAttr;
+        saAttr.nLength = sizeof(SECURITY_ATTRIBUTES);
+        saAttr.bInheritHandle = TRUE;
+        saAttr.lpSecurityDescriptor = NULL;
+        
+        HANDLE hChildStdoutRd, hChildStdoutWr;
+        
+        if (!CreatePipe(&hChildStdoutRd, &hChildStdoutWr, &saAttr, 0)) {
+            return "创建管道失败";
+        }
+        
+        if (!SetHandleInformation(hChildStdoutRd, HANDLE_FLAG_INHERIT, 0)) {
+            return "设置句柄信息失败";
+        }
+        
+        PROCESS_INFORMATION piProcInfo;
+        STARTUPINFO siStartInfo;
+        
+        ZeroMemory(&piProcInfo, sizeof(PROCESS_INFORMATION));
+        ZeroMemory(&siStartInfo, sizeof(STARTUPINFO));
+        
+        siStartInfo.cb = sizeof(STARTUPINFO);
+        siStartInfo.hStdError = hChildStdoutWr;
+        siStartInfo.hStdOutput = hChildStdoutWr;
+        siStartInfo.dwFlags |= STARTF_USESTDHANDLES;
+        
+        std::string cmd = "cmd.exe /c " + command;
+        
+        BOOL bSuccess = CreateProcess(NULL,
+            const_cast<char*>(cmd.c_str()), // 命令行
+            NULL,          // 进程安全属性
+            NULL,          // 主线程安全属性
+            TRUE,          // 句柄继承
+            0,             // 创建标志
+            NULL,          // 使用父进程环境块
+            NULL,          // 使用父进程起始目录
+            &siStartInfo,  // STARTUPINFO指针
+            &piProcInfo);  // PROCESS_INFORMATION指针
+        
+        if (!bSuccess) {
+            return "创建进程失败";
+        }
+        
+        CloseHandle(hChildStdoutWr);
+        
+        DWORD dwRead;
+        CHAR chBuf[4096];
+        BOOL bSuccessRead = FALSE;
+        
+        for (;;) {
+            bSuccessRead = ReadFile(hChildStdoutRd, chBuf, 4096, &dwRead, NULL);
+            if (!bSuccessRead || dwRead == 0) break;
+            
+            std::string temp(chBuf, dwRead);
+            result += temp;
+        }
+        
+        WaitForSingleObject(piProcInfo.hProcess, INFINITE);
+        
+        CloseHandle(piProcInfo.hProcess);
+        CloseHandle(piProcInfo.hThread);
+        CloseHandle(hChildStdoutRd);
     #else
+        // 在Unix/Linux上使用popen
         FILE* pipe = popen(command.c_str(), "r");
-    #endif
-    
-    if (!pipe) {
-        return "命令执行失败";
-    }
-    
-    char buffer[256];
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-        result += buffer;
-    }
-    
-    // 清理管道
-    #ifdef _WIN32
-        _pclose(pipe);
-    #else
+        
+        if (!pipe) {
+            return "命令执行失败";
+        }
+        
+        char buffer[256];
+        while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+            result += buffer;
+        }
+        
         pclose(pipe);
     #endif
     

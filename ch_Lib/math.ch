@@ -21,8 +21,9 @@
     定义(小数) result = 0;
     定义(小数) term = radian;
     定义(整型) n = 1;
+    定义(整型) max_iterations = 10;
     
-    当 (n < 20) {
+    当 (n < max_iterations) {
         如果 (n % 2 == 1) {
             result = result + term;
         } 否则 {
@@ -33,6 +34,7 @@
         n = n + 2;
     }
     
+    控制台输出("计算 sin(" + x + "°) = " + result);
     返回 result;
 }
 
@@ -45,22 +47,29 @@
     定义(小数) result = 1;
     定义(小数) term = 1;
     定义(整型) n = 2;
+    定义(整型) max_iterations = 10;
     
-    当 (n < 20) {
-        result = result - term;
+    当 (n < max_iterations) {
+        如果 (n % 2 == 0) {
+            result = result - term;
+        } 否则 {
+            result = result + term;
+        }
         
         term = term * radian * radian / (n * (n - 1));
         n = n + 2;
     }
     
+    控制台输出("计算 cos(" + x + "°) = " + result);
     返回 result;
 }
 
 // 正切函数
 定义(小数) tan(定义(小数) x) {
+    定义(小数) sin_val = sin(x);
     定义(小数) cos_val = cos(x);
     
-    如果 (cos_val < 0.0001) {
+    如果 (cos_val < 0.0001 && cos_val > -0.0001) {
         如果 (cos_val >= 0) {
             返回 999999.0;
         } 否则 {
@@ -68,7 +77,9 @@
         }
     }
     
-    返回 sin(x) / cos_val;
+    定义(小数) result = sin_val / cos_val;
+    控制台输出("计算 tan(" + x + "°) = " + result);
+    返回 result;
 }
 
 // 反正弦函数
