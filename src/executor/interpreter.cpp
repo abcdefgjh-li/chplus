@@ -207,7 +207,7 @@ std::string SymbolTable::createStructInstance(const std::string& structName, int
     for (size_t i = 0; i < structInfo.members.size(); ++i) {
         const auto& member = structInfo.members[i];
         
-        // 根据成员类型设置默认值（只包含值，不包含成员名）
+        // 根据成员类型设置默认值
         if (member.first == "整型") {
             instance += "0";
         } else if (member.first == "小数") {
@@ -1561,18 +1561,20 @@ std::string Interpreter::evaluate(ASTNode* node, SymbolTable* scope) {
                 throw std::runtime_error("结构体 " + structType + " 没有成员 " + assign->memberName + " 在第 " + std::to_string(node->line) + " 行");
             }
             
-            // 解析并更新成员值
+            // 解析并更新成员值（格式：值1;值2;值3）
             size_t startPos = 0;
             size_t semicolonPos = members.find(';');
             int currentIndex = 0;
             
             while (semicolonPos != std::string::npos) {
+                std::string memberValue = members.substr(startPos, semicolonPos - startPos);
+                
                 if (currentIndex == memberIndex) {
                     // 更新当前成员的值
                     newStructValue += newValue;
                 } else {
                     // 保留其他成员的值
-                    newStructValue += members.substr(startPos, semicolonPos - startPos);
+                    newStructValue += memberValue;
                 }
                 
                 newStructValue += ";";
@@ -1582,12 +1584,14 @@ std::string Interpreter::evaluate(ASTNode* node, SymbolTable* scope) {
             }
             
             // 处理最后一个成员
-            if (currentIndex == memberIndex) {
-                // 更新最后一个成员的值
-                newStructValue += newValue;
-            } else {
-                // 保留最后一个成员的值
-                newStructValue += members.substr(startPos);
+            if (startPos < members.length()) {
+                std::string memberValue = members.substr(startPos);
+                
+                if (currentIndex == memberIndex) {
+                    newStructValue += newValue;
+                } else {
+                    newStructValue += memberValue;
+                }
             }
             
             // 更新结构体变量值
@@ -1720,7 +1724,7 @@ std::string Interpreter::evaluate(ASTNode* node, SymbolTable* scope) {
             }
             
             // 逻辑运算符处理
-            if (binExpr->op == "&&" || binExpr->op == "和") {
+            if (binExpr->op == "&&" || binExpr->op == "和" || binExpr->op == "且") {
                 bool leftTrue = (left == "true" || left == "真" || (leftIsNumber && leftValue != 0));
                 bool rightTrue = (right == "true" || right == "真" || (rightIsNumber && rightValue != 0));
                 return (leftTrue && rightTrue) ? "真" : "假";
