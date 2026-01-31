@@ -1,6 +1,30 @@
-#include "../../include/utils/CodeFormatter.h"
+#include "CodeFormatter.h"
 #include <algorithm>
 #include <cctype>
+
+bool CodeFormatter::isNewline(char c) const {
+    return c == '\n' || c == '\r';
+}
+
+bool CodeFormatter::isQuote(char c) const {
+    return c == '"' || c == '\'';
+}
+
+bool CodeFormatter::isWhitespace(char c) const {
+    return c == ' ' || c == '\t' || c == '\v' || c == '\f';
+}
+
+bool CodeFormatter::isAlpha(char c) const {
+    return std::isalpha(static_cast<unsigned char>(c));
+}
+
+bool CodeFormatter::isDigit(char c) const {
+    return std::isdigit(static_cast<unsigned char>(c));
+}
+
+bool CodeFormatter::isAlphaNum(char c) const {
+    return isAlpha(c) || isDigit(c);
+}
 
 std::string CodeFormatter::format() {
     formatted.str("");

@@ -206,7 +206,7 @@
 // 小数转字符串
 定义(字符串) 小数转字符串(定义(小数) num) {
     // 简化的实现，只显示小数点后2位
-    定义(整型) intPart = static_cast<int>(num);
+    定义(整型) intPart = 字符串转整数(小数转字符串(num));
     定义(小数) fracPart = num - intPart;
     
     如果 (fracPart < 0) {
@@ -214,7 +214,7 @@
     }
     
     // 四舍五入到小数点后2位
-    定义(小数) rounded = static_cast<int>(fracPart * 100 + 0.5) / 100.0;
+    定义(小数) rounded = 字符串转整数(小数转字符串(fracPart * 100 + 0.5)) / 100.0;
     
     如果 (rounded >= 1.0) {
         intPart = intPart + 1;
@@ -231,7 +231,7 @@
     
     当 (i < 2) {
         temp = temp * 10;
-        定义(整型) digit = static_cast<int>(temp);
+        定义(整型) digit = 字符串转整数(小数转字符串(temp));
         fracStr = fracStr + 整数转字符串(digit);
         temp = temp - digit;
         i = i + 1;

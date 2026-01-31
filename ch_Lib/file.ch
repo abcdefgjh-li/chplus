@@ -11,15 +11,15 @@
     }
     
     // 使用系统命令实现真正的文件重定向
-    如果 (mode == "w" 或者 mode == "写") {
+    如果 (mode == "w" || mode == "写") {
         // 写模式重定向
         系统命令行("echo 文件重定向到: " + filename + " (写模式) > " + filename);
         返回 "重定向到文件: " + filename + " (写模式)";
-    } 否则 如果 (mode == "a" 或者 mode == "追加") {
+    } 否则 如果 (mode == "a") {
         // 追加模式重定向
         系统命令行("echo 文件重定向到: " + filename + " (追加模式) >> " + filename);
         返回 "重定向到文件: " + filename + " (追加模式)";
-    } 否则 如果 (mode == "r" 或者 mode == "读") {
+    } 否则 如果 (mode == "r") {
         // 读模式重定向
         系统命令行("echo 文件重定向到: " + filename + " (读模式)");
         返回 "重定向到文件: " + filename + " (读模式)";
@@ -204,7 +204,9 @@
     }
     
     // 查找最后一个斜杠或反斜杠
-    定义(整型) slash_pos = 最大值(查找(filepath, "/"), 查找(filepath, "\\"));
+    定义(整型) slash_pos1 = 查找(filepath, "/");
+    定义(整型) slash_pos2 = 查找(filepath, "\\");
+    定义(整型) slash_pos = 如果 (slash_pos1 > slash_pos2) 那么 slash_pos1 否则 slash_pos2;
     如果 (slash_pos == -1) {
         返回 filepath;
     }
@@ -221,7 +223,9 @@
     }
     
     // 查找最后一个斜杠或反斜杠
-    定义(整型) slash_pos = 最大值(查找(filepath, "/"), 查找(filepath, "\\"));
+    定义(整型) slash_pos1 = 查找(filepath, "/");
+    定义(整型) slash_pos2 = 查找(filepath, "\\");
+    定义(整型) slash_pos = 如果 (slash_pos1 > slash_pos2) 那么 slash_pos1 否则 slash_pos2;
     如果 (slash_pos == -1) {
         返回 ".";
     }
@@ -268,7 +272,7 @@
 
 // 重命名文件
 定义(字符串) 重命名文件(定义(字符串) old_name, 定义(字符串) new_name) {
-    如果 (old_name == "" 或者 new_name == "") {
+    如果 (old_name == "" || new_name == "") {
         返回 "文件名不能为空";
     }
     
@@ -290,13 +294,6 @@
     定义(字符串) result = 系统命令行("type " + filename);
     返回 result;
 }
-    
-    // 使用系统命令读取文件行
-    系统命令行("echo 逐行读取文件: " + filename);
-    系统命令行("type " + filename);
-    
-    返回 lines;
-}
 
 // 写入多行到文件
 定义(字符串) 写入多行(定义(字符串) filename, 定义(数组) lines) {
@@ -312,7 +309,7 @@
 
 // 合并文件
 定义(字符串) 合并文件(定义(字符串) file1, 定义(字符串) file2, 定义(字符串) output_file) {
-    如果 (file1 == "" 或者 file2 == "" 或者 output_file == "") {
+    如果 (file1 == "" || file2 == "" || output_file == "") {
         返回 "文件名不能为空";
     }
     
@@ -323,7 +320,7 @@
 
 // 分割文件
 定义(字符串) 分割文件(定义(字符串) filename, 定义(整型) lines_per_file, 定义(字符串) prefix) {
-    如果 (filename == "" 或者 lines_per_file <= 0) {
+    如果 (filename == "" || lines_per_file <= 0) {
         返回 "参数错误";
     }
     
@@ -367,7 +364,7 @@
     系统命令行("cd " + filepath);
     
     // 如果已经是绝对路径，直接返回
-    如果 (查找(filepath, ":") != -1 或者 查找(filepath, "/") == 0) {
+    如果 (查找(filepath, ":") != -1 || 查找(filepath, "/") == 0) {
         返回 filepath;
     }
     
@@ -388,15 +385,33 @@
     定义(字符串) normalized = filepath;
     
     // 将所有反斜杠替换为正斜杠
-    normalized = 全部替换(normalized, "\\", "/");
+    定义(字符串) temp_normalized = "";
+    定义(整型) i = 0;
+    当 (i < 字符串长度(normalized)) {
+        定义(字符串) char = 字符串子串(normalized, i, 1);
+        如果 (char == "\\") {
+            temp_normalized = temp_normalized + "/";
+        } 否则 {
+            temp_normalized = temp_normalized + char;
+        }
+        i = i + 1;
+    }
+    normalized = temp_normalized;
     
     // 移除重复的斜杠
-    定义(整型) pos = 0;
-    当 (pos < 字符串长度(normalized)) {
-        如果 (查找(字符串子串(normalized, pos, 字符串长度(normalized) - pos), "//") != -1) {
-            normalized = 全部替换(normalized, "//", "/");
+    定义(字符串) final_normalized = "";
+    定义(整型) j = 0;
+    当 (j < 字符串长度(normalized)) {
+        定义(字符串) char = 字符串子串(normalized, j, 1);
+        如果 (j == 0) {
+            final_normalized = final_normalized + char;
+        } 否则 {
+            定义(字符串) prev_char = 字符串子串(normalized, j-1, 1);
+            如果 (char != "/" 或 prev_char != "/") {
+                final_normalized = final_normalized + char;
+            }
         }
-        pos = pos + 1;
+        j = j + 1;
     }
     
     返回 normalized;
@@ -428,7 +443,7 @@
     // 使用系统命令检查二进制文件
     系统命令行("echo 检查二进制文件: " + filename);
     
-    返回 不是(是文本文件(filename));
+    返回 如果 (是文本文件(filename)) 那么 假 否则 真;
 }
 
 // 获取文件类型描述
@@ -446,15 +461,15 @@
     
     定义(字符串) ext = 文件扩展名(filename);
     
-    如果 (ext == ".jpg" 或者 ext == ".png" 或者 ext == ".gif") {
+    如果 (ext == ".jpg" || ext == ".png" || ext == ".gif") {
         返回 "图片文件";
-    } 否则 如果 (ext == ".mp3" 或者 ext == ".wav") {
+    } 否则 如果 (ext == ".mp3" || ext == ".wav") {
         返回 "音频文件";
-    } 否则 如果 (ext == ".mp4" 或者 ext == ".avi") {
+    } 否则 如果 (ext == ".mp4" || ext == ".avi") {
         返回 "视频文件";
     } 否则 如果 (ext == ".pdf") {
         返回 "PDF文档";
-    } 否则 如果 (ext == ".zip" 或者 ext == ".rar") {
+    } 否则 如果 (ext == ".zip" 或 ext == ".rar") {
         返回 "压缩文件";
     } 否则 {
         返回 "二进制文件";

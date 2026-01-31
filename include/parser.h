@@ -67,10 +67,16 @@ class VariableDefNode : public ASTNode {
 public:
     std::string type;
     std::string name;
+    bool isArray;
+    std::unique_ptr<ASTNode> arraySizeExpr; // 支持动态数组大小表达式
     std::unique_ptr<ASTNode> initializer;
     
+    VariableDefNode(const std::string& type, const std::string& name, bool isArray, std::unique_ptr<ASTNode> arraySizeExpr, std::unique_ptr<ASTNode> initializer, int line, int column)
+        : ASTNode(NodeType::VARIABLE_DEF, line, column), type(type), name(name), isArray(isArray), arraySizeExpr(std::move(arraySizeExpr)), initializer(std::move(initializer)) {}
+    
+    // 兼容性构造函数（用于向后兼容）
     VariableDefNode(const std::string& type, const std::string& name, std::unique_ptr<ASTNode> initializer, int line, int column)
-        : ASTNode(NodeType::VARIABLE_DEF, line, column), type(type), name(name), initializer(std::move(initializer)) {}
+        : ASTNode(NodeType::VARIABLE_DEF, line, column), type(type), name(name), isArray(false), arraySizeExpr(nullptr), initializer(std::move(initializer)) {}
 };
 
 // 函数定义节点
@@ -403,6 +409,7 @@ private:
     std::unique_ptr<ASTNode> parseSystemCmdExpression();
     std::unique_ptr<ASTNode> parseStructDef();
     std::unique_ptr<ASTNode> parseStructMemberAccess();
+    std::unique_ptr<ASTNode> parseArrayAccess(const std::string& arrayName);
     
 public:
     Parser(const std::vector<Token>& tokens);
@@ -410,6 +417,12 @@ public:
     
     // 公开的函数，用于导入文件时解析程序
     std::unique_ptr<ProgramNode> parseProgram();
+    
+    // 内部解析函数声明
+    std::unique_ptr<ASTNode> parseDefinition();
+    std::unique_ptr<ASTNode> parseStructDefinition(int line, int column);
+    std::unique_ptr<ASTNode> parseFunctionDefCommon(const std::string& type, const std::string& name, int line, int column);
+    std::unique_ptr<ASTNode> parseVariableDefCommon(const std::string& type, const std::string& name, int line, int column);
 };
 
 #endif // PARSER_H

@@ -61,6 +61,7 @@ private:
     std::unique_ptr<ProgramNode> program;
     SymbolTable* globalScope;
     std::set<std::string> importedFiles; // 跟踪已导入的文件，防止循环导入
+    bool debugMode; // 调试模式标志
     
     std::string evaluate(ASTNode* node, SymbolTable* scope);
     void executeStatement(ASTNode* node, SymbolTable* scope, const std::string& expectedReturnType = "");
@@ -69,11 +70,18 @@ private:
     std::string executeSystemCommandExpression(ASTNode* commandNode, SymbolTable* scope, int line);
     std::string executeCommandWithOutput(const std::string& command);
     
+    // 调试输出函数
+    void debugOutput(const std::string& message);
+    void debugTokenInfo(const std::vector<Token>& tokens);
+    void debugASTInfo(ASTNode* node, int depth = 0);
+    void debugSymbolTable(SymbolTable* scope, const std::string& scopeName = "当前作用域");
+    
 public:
-    Interpreter(std::unique_ptr<ProgramNode> program);
+    Interpreter(std::unique_ptr<ProgramNode> program, bool debug = false);
     ~Interpreter();
     
     void run();
+    void setDebugMode(bool debug);
 };
 
 #endif // INTERPRETER_H

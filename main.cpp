@@ -320,6 +320,7 @@ int main(int argc, char* argv[]) {
     // 解析命令行参数
     bool noFormat = false;
     bool autoFormat = false; // -a 参数
+    bool debugMode = false;  // -d 参数
     std::string filename;
     
     for (int i = 1; i < argc; i++) {
@@ -328,12 +329,15 @@ int main(int argc, char* argv[]) {
             noFormat = true;
         } else if (arg == "-a") {
             autoFormat = true;
+        } else if (arg == "-d") {
+            debugMode = true;
         } else if (arg.substr(0, 1) != "-") {
             filename = arg;
         } else if (arg == "--help" || arg == "-h") {
             std::cout << "用法: chplus [选项] <文件名>.ch" << std::endl;
             std::cout << "选项:" << std::endl;
             std::cout << "  -a               自动格式化并覆盖原文件" << std::endl;
+            std::cout << "  -d               启用调试模式，显示详细执行信息" << std::endl;
             std::cout << "  --no-format, -n 不自动格式化代码" << std::endl;
             std::cout << "  --help, -h      显示帮助信息" << std::endl;
             return 0;
@@ -374,8 +378,24 @@ int main(int argc, char* argv[]) {
         auto program = parser.parse();
         
         // 执行
-        Interpreter interpreter(std::move(program));
-        interpreter.run();
+        Interpreter interpreter(std::move(program), debugMode);
+        
+        // 检查是否是标准库文件（不包含主函数的文件）
+        bool hasMainFunction = false;
+        for (const auto& token : tokens) {
+            if (token.type == TokenType::MAIN) {
+                hasMainFunction = true;
+                break;
+            }
+        }
+        
+        if (hasMainFunction) {
+            // 如果是程序文件（包含主函数），正常执行
+            interpreter.run();
+        } else {
+            // 如果是库文件（不包含主函数），只解析不执行
+            std::cout << "库文件已加载: " << filename << " (不包含主函数，跳过执行)" << std::endl;
+        }
         
     } catch (const std::exception& e) {
         std::cerr << "错误: " << e.what() << std::endl;

@@ -2,6 +2,8 @@
 // 作者: chplus解释器
 // 版本: 2.0
 
+导入("ch_Lib/string.ch");
+
 // 数学常数
 定义(小数) PI = 3.14159265358979323846;
 定义(小数) E = 2.71828182845904523536;
@@ -194,20 +196,21 @@
 
 // 向上取整
 定义(小数) ceil(定义(小数) x) {
-    如果 (x == static_cast<int>(x)) {
+    定义(整型) int_x = 字符串转整数(小数转字符串(x));
+    如果 (x == int_x) {
         返回 x;
     }
     
     如果 (x > 0) {
-        返回 static_cast<int>(x) + 1;
+        返回 int_x + 1;
     } 否则 {
-        返回 static_cast<int>(x);
+        返回 int_x;
     }
 }
 
 // 向下取整
 定义(小数) floor(定义(小数) x) {
-    定义(整型) int_x = static_cast<int>(x);
+    定义(整型) int_x = 字符串转整数(小数转字符串(x));
     
     如果 (x < 0) {
         如果 (x != int_x) {
@@ -220,17 +223,18 @@
 
 // 四舍五入
 定义(小数) round(定义(小数) x) {
+    定义(整型) int_x = 字符串转整数(小数转字符串(x));
     如果 (x >= 0) {
-        如果 (x - static_cast<int>(x) >= 0.5) {
-            返回 static_cast<int>(x) + 1;
+        如果 (x - int_x >= 0.5) {
+            返回 int_x + 1;
         } 否则 {
-            返回 static_cast<int>(x);
+            返回 int_x;
         }
     } 否则 {
-        如果 (static_cast<int>(x) - x >= 0.5) {
-            返回 static_cast<int>(x) - 1;
+        如果 (int_x - x >= 0.5) {
+            返回 int_x - 1;
         } 否则 {
-            返回 static_cast<int>(x);
+            返回 int_x;
         }
     }
 }

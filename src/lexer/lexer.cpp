@@ -107,6 +107,35 @@ Token Lexer::identifier() {
         return Token(keywords[text], text, startLine, startColumn);
     }
     
+    // 特殊处理：检查是否是 "否则如果" 组合（不带空格的情况）
+    if (text == "否则如果") {
+        return Token(TokenType::ELSE_IF, "否则如果", startLine, startColumn);
+    }
+    
+    // 特殊处理：检查是否是 "否则 如果" 组合（有空格的情况）
+    if (text == "否则" && position < source.length()) {
+        // 保存当前位置
+        size_t savedPos = position;
+        int savedLine = line;
+        int savedColumn = column;
+        
+        // 跳过空白字符
+        skipWhitespace();
+        
+        // 检查后面是否是 "如果"
+        if (position + 2 <= source.length() && source.substr(position, 2) == "如果") {
+            // 解析 "如果"
+            position += 2;
+            column += 2;
+            return Token(TokenType::ELSE_IF, "否则如果", startLine, startColumn);
+        } else {
+            // 如果不是 "如果"，恢复位置
+            position = savedPos;
+            line = savedLine;
+            column = savedColumn;
+        }
+    }
+    
     return Token(TokenType::IDENTIFIER, text, startLine, startColumn);
 }
 
@@ -345,13 +374,31 @@ std::vector<Token> Lexer::tokenize() {
             }
         }
         // 处理分隔符
-        else if (c == '(') {
+        else if (c == '(' || (position + 2 < source.length() && 
+                 static_cast<unsigned char>(source[position]) == 0xEF && 
+                 static_cast<unsigned char>(source[position+1]) == 0xBC && 
+                 static_cast<unsigned char>(source[position+2]) == 0x88)) { // 全角左括号（
             tokens.push_back(Token(TokenType::LPAREN, "(", line, column));
-            advance();
+            if (c == '(') {
+                advance();
+            } else {
+                // 跳过UTF-8字符的3个字节
+                position += 3;
+                column += 3;
+            }
         }
-        else if (c == ')') {
+        else if (c == ')' || (position + 2 < source.length() && 
+                 static_cast<unsigned char>(source[position]) == 0xEF && 
+                 static_cast<unsigned char>(source[position+1]) == 0xBC && 
+                 static_cast<unsigned char>(source[position+2]) == 0x89)) { // 全角右括号）
             tokens.push_back(Token(TokenType::RPAREN, ")", line, column));
-            advance();
+            if (c == ')') {
+                advance();
+            } else {
+                // 跳过UTF-8字符的3个字节
+                position += 3;
+                column += 3;
+            }
         }
         else if (c == '{') {
             tokens.push_back(Token(TokenType::LBRACE, "{", line, column));
@@ -369,13 +416,31 @@ std::vector<Token> Lexer::tokenize() {
             tokens.push_back(Token(TokenType::RBRACKET, "]", line, column));
             advance();
         }
-        else if (c == ',') {
+        else if (c == ',' || (position + 2 < source.length() && 
+                 static_cast<unsigned char>(source[position]) == 0xEF && 
+                 static_cast<unsigned char>(source[position+1]) == 0xBC && 
+                 static_cast<unsigned char>(source[position+2]) == 0x8C)) { // 全角逗号，
             tokens.push_back(Token(TokenType::COMMA, ",", line, column));
-            advance();
+            if (c == ',') {
+                advance();
+            } else {
+                // 跳过UTF-8字符的3个字节
+                position += 3;
+                column += 3;
+            }
         }
-        else if (c == ';') {
+        else if (c == ';' || (position + 2 < source.length() && 
+                 static_cast<unsigned char>(source[position]) == 0xEF && 
+                 static_cast<unsigned char>(source[position+1]) == 0xBC && 
+                 static_cast<unsigned char>(source[position+2]) == 0x9B)) { // 全角分号；
             tokens.push_back(Token(TokenType::SEMICOLON, ";", line, column));
-            advance();
+            if (c == ';') {
+                advance();
+            } else {
+                // 跳过UTF-8字符的3个字节
+                position += 3;
+                column += 3;
+            }
         }
         else if (c == '.') {
             tokens.push_back(Token(TokenType::DOT, ".", line, column));
