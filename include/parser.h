@@ -423,6 +423,7 @@ public:
     std::unique_ptr<ASTNode> parseStructDefinition(int line, int column);
     std::unique_ptr<ASTNode> parseFunctionDefCommon(const std::string& type, const std::string& name, int line, int column);
     std::unique_ptr<ASTNode> parseVariableDefCommon(const std::string& type, const std::string& name, int line, int column);
+    std::unique_ptr<ASTNode> parseCStyleVariableDef();
 };
 
 #endif // PARSER_H
