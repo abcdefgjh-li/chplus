@@ -13,6 +13,17 @@
 #include <windows.h>
 #endif
 
+// Break和Continue异常类
+class BreakException : public std::exception {
+public:
+    BreakException() : std::exception() {}
+};
+
+class ContinueException : public std::exception {
+public:
+    ContinueException() : std::exception() {}
+};
+
 // 简单的类型推断函数
 std::string inferType(const std::string& value) {
     if (value == "真" || value == "假") {
@@ -21,14 +32,12 @@ std::string inferType(const std::string& value) {
         return "小数";
     } else if (value.length() > 0 && (value[0] == '"' || value[0] == '\'')) {
         return "字符串";
+    } else if (value == "") {
+        return "字符串"; // 空字符串明确返回字符串类型
     } else {
-        // 尝试解析为整数
-        try {
-            std::stoi(value);
-            return "整型";
-        } catch (...) {
-            return "字符串"; // 默认当作字符串
-        }
+        // 对于函数返回值，保持其原始类型
+        // 这里不尝试解析为整数，因为字符串类型的数字也应该被视为字符串
+        return "字符串"; // 默认当作字符串
     }
 }
 
@@ -42,12 +51,92 @@ SymbolTable::~SymbolTable() {
 }
 
 // 定义变量
-void SymbolTable::defineVariable(const std::string& name, const std::string& type, const std::string& value, int line) {
+void SymbolTable::defineVariable(const std::string& name, const std::string& type, const std::string& value, int line, bool initArrayElements) {
     if (variables.find(name) != variables.end()) {
         std::string lineInfo = line > 0 ? " 在第 " + std::to_string(line) + " 行" : "";
         throw std::runtime_error("变量已定义: " + name + lineInfo);
     }
-    variables[name] = std::make_pair(type, value);
+    
+    // 检查是否是数组参数（包含方括号）
+    if (name.find("[") != std::string::npos && name.find("]") != std::string::npos && initArrayElements) {
+        // 提取数组名和维度大小
+        std::string arrayName = name.substr(0, name.find("["));
+        std::string dimsStr = name.substr(name.find("["));
+        
+        // 解析所有维度大小
+        std::vector<int> dimensions;
+        size_t pos = 0;
+        while (pos < dimsStr.length()) {
+            if (dimsStr[pos] == '[') {
+                size_t endPos = dimsStr.find(']', pos);
+                if (endPos == std::string::npos) {
+                    throw std::runtime_error("数组参数语法错误: " + name);
+                }
+                
+                std::string sizeStr = dimsStr.substr(pos + 1, endPos - pos - 1);
+                try {
+                    int dimensionSize = std::stoi(sizeStr);
+                    dimensions.push_back(dimensionSize);
+                } catch (const std::exception& e) {
+                    throw std::runtime_error("数组参数维度大小无效: " + sizeStr);
+                }
+                pos = endPos + 1;
+            } else {
+                pos++;
+            }
+        }
+        
+        // 定义数组本身
+        variables[name] = std::make_pair(type, value);
+        
+        // 初始化所有数组元素
+        std::vector<int> indices(dimensions.size(), 0);
+        bool initialized = true;
+        
+        while (initialized) {
+            // 构造元素名称
+            std::string elementName = arrayName;
+            for (int idx : indices) {
+                elementName += "[" + std::to_string(idx) + "]";
+            }
+            
+            // 根据类型初始化默认值
+            std::string defaultValue = "0";
+            if (type == "字符串") {
+                defaultValue = "\"\"";
+            } else if (type == "小数") {
+                defaultValue = "0.0";
+            } else if (type == "布尔型") {
+                defaultValue = "假";
+            } else if (type == "字符型") {
+                defaultValue = "'";
+            }
+            
+            // 定义数组元素
+            variables[elementName] = std::make_pair(type, defaultValue);
+            
+            // 更新索引
+            int dimIndex = dimensions.size() - 1;
+            while (dimIndex >= 0) {
+                if (dimIndex >= static_cast<int>(indices.size())) {
+                    initialized = false;
+                    break;
+                }
+                indices[dimIndex]++;
+                if (dimIndex < static_cast<int>(dimensions.size()) && indices[dimIndex] < dimensions[dimIndex]) {
+                    break;
+                }
+                indices[dimIndex] = 0;
+                dimIndex--;
+            }
+            
+            if (dimIndex < 0) {
+                initialized = false;
+            }
+        }
+    } else {
+        variables[name] = std::make_pair(type, value);
+    }
 }
 
 // 设置变量值
@@ -345,6 +434,26 @@ void Interpreter::run() {
                         std::vector<int> indices(dimensions.size(), 0);
                         bool initialized = true;
                         
+                        // 检查是否是大括号初始化列表
+                        bool useBraceInit = varDef->initializer && varDef->initializer->type == NodeType::BRACE_INIT_LIST;
+                        std::vector<std::string> braceInitValues;
+                        if (useBraceInit) {
+                            BraceInitListNode* braceInit = static_cast<BraceInitListNode*>(varDef->initializer.get());
+                            // 递归解析嵌套的初始化列表
+                            std::function<void(BraceInitListNode*, std::vector<std::string>&)> parseBraceInit = 
+                                [&](BraceInitListNode* node, std::vector<std::string>& values) {
+                                    for (const auto& element : node->elements) {
+                                        if (element->type == NodeType::BRACE_INIT_LIST) {
+                                            parseBraceInit(static_cast<BraceInitListNode*>(element.get()), values);
+                                        } else {
+                                            values.push_back(evaluate(element.get(), globalScope));
+                                        }
+                                    }
+                                };
+                            parseBraceInit(braceInit, braceInitValues);
+                        }
+                        
+                        int elementIndex = 0;
                         while (initialized) {
                             // 根据类型初始化元素值
                             std::string elementValue;
@@ -367,19 +476,35 @@ void Interpreter::run() {
                                 }
                             }
                             
+                            // 如果是大括号初始化列表，使用列表中的值
+                            if (useBraceInit && elementIndex < static_cast<int>(braceInitValues.size())) {
+                                elementValue = braceInitValues[elementIndex];
+                            }
+                            
                             // 将元素值添加到数组值中
                             arrayValue += elementValue + ";";
                             
+                            elementIndex++;
+                            
                             // 更新索引
-                            int dim = dimensions.size() - 1;
-                            while (dim >= 0) {
-                                indices[dim]++;
-                                if (indices[dim] < dimensions[dim]) {
-                                    break;
-                                } else {
-                                    indices[dim] = 0;
-                                    dim--;
+                            int dim = -1;
+                            if (!dimensions.empty()) {
+                                dim = dimensions.size() - 1;
+                                while (dim >= 0) {
+                                    if (dim >= static_cast<int>(indices.size())) {
+                                        initialized = false;
+                                        break;
+                                    }
+                                    indices[dim]++;
+                                    if (dim < static_cast<int>(dimensions.size()) && indices[dim] < dimensions[dim]) {
+                                        break;
+                                    } else {
+                                        indices[dim] = 0;
+                                        dim--;
+                                    }
                                 }
+                            } else {
+                                initialized = false;
                             }
                             
                             // 检查是否完成所有元素的初始化
@@ -388,8 +513,66 @@ void Interpreter::run() {
                             }
                         }
                         
-                        // 定义全局数组变量
-                        globalScope->defineVariable(varDef->name, varDef->type, arrayValue, stmt->line);
+                        // 定义全局数组变量（不初始化数组元素，稍后手动初始化）
+                        globalScope->defineVariable(varDef->name, varDef->type, arrayValue, stmt->line, false);
+                        
+                        // 手动初始化数组元素
+                        indices.assign(dimensions.size(), 0);
+                        initialized = true;
+                        elementIndex = 0;
+                        while (initialized) {
+                            // 构造元素名称
+                            std::string elementName = varDef->name;
+                            for (int idx : indices) {
+                                elementName += "[" + std::to_string(idx) + "]";
+                            }
+                            
+                            // 根据类型初始化默认值
+                            std::string elementValue;
+                            if (varDef->type == "整型" || varDef->type == "小数" || varDef->type == "布尔型") {
+                                elementValue = "0";
+                            } else if (varDef->type == "字符串") {
+                                elementValue = "\"\"";
+                            } else if (varDef->type == "字符型") {
+                                elementValue = "'";
+                            } else {
+                                elementValue = globalScope->createStructInstance(varDef->type, stmt->line);
+                                size_t colonPos = elementValue.find(':');
+                                if (colonPos != std::string::npos) {
+                                    elementValue = elementValue.substr(colonPos + 1);
+                                }
+                            }
+                            
+                            // 如果是大括号初始化列表，使用列表中的值
+                            if (useBraceInit && elementIndex < static_cast<int>(braceInitValues.size())) {
+                                elementValue = braceInitValues[elementIndex];
+                            }
+                            
+                            // 手动定义数组元素
+                            globalScope->defineVariable(elementName, varDef->type, elementValue, stmt->line, false);
+                            
+                            elementIndex++;
+                            
+                            // 更新索引
+                            int dim = dimensions.size() - 1;
+                            while (dim >= 0) {
+                                if (dim >= static_cast<int>(indices.size())) {
+                                    initialized = false;
+                                    break;
+                                }
+                                indices[dim]++;
+                                if (dim < static_cast<int>(dimensions.size()) && indices[dim] < dimensions[dim]) {
+                                    break;
+                                } else {
+                                    indices[dim] = 0;
+                                    dim--;
+                                }
+                            }
+                            
+                            if (dim < 0) {
+                                initialized = false;
+                            }
+                        }
                     } else {
                         // 处理普通变量定义
                         std::string value = "";
@@ -411,7 +594,7 @@ void Interpreter::run() {
                         }
                         
                         // 定义全局变量
-                        globalScope->defineVariable(varDef->name, varDef->type, value, stmt->line);
+                        globalScope->defineVariable(varDef->name, varDef->type, value, stmt->line, true);
                     }
                 }
             }
@@ -421,17 +604,20 @@ void Interpreter::run() {
     // 然后查找并执行主函数
     if (globalScope->hasFunction("主函数")) {
         FunctionDefNode* mainFunc = globalScope->getFunction("主函数", std::vector<std::string>(), 0);
+        SymbolTable* mainScope = globalScope->enterScope();
+        // 创建一个返回值存储变量
+        mainScope->defineVariable("__return_value", mainFunc->returnType, "", 0, true);
         try {
-            // 创建主函数作用域
-            SymbolTable* mainScope = globalScope->enterScope();
             executeStatement(mainFunc->body.get(), mainScope, "空类型");
         } catch (const std::runtime_error& e) {
             // 主函数中的返回语句异常不需要处理
-            if (e.what() != "__return_from_function__") {
+            if (std::string(e.what()) != "__return_from_function__") {
+                delete mainScope;
                 throw;
             }
             // 对于主函数，即使是正常的函数结束也不应该抛出异常
         }
+        delete mainScope;
     } else {
         throw std::runtime_error("未找到主函数 在第 0 行");
     }
@@ -463,8 +649,28 @@ void Interpreter::executeStatement(ASTNode* node, SymbolTable* scope, const std:
             if (varDef->isArray) {
                 std::vector<int> dimensions;
                 
-                // 处理第一维
-                if (varDef->arraySizeExpr) {
+                // 处理所有维度（最多5维）
+                if (!varDef->arraySizeExprs.empty()) {
+                    for (const auto& sizeExpr : varDef->arraySizeExprs) {
+                        std::string sizeValue = evaluate(sizeExpr.get(), scope);
+                        debugOutput("数组维度大小: " + sizeValue);
+                        try {
+                            int size = std::stoi(sizeValue);
+                            if (size <= 0) {
+                                throw std::runtime_error("数组大小必须为正整数 在第 " + std::to_string(node->line) + " 行");
+                            }
+                            if (size > 1000) {
+                                throw std::runtime_error("数组维度大小过大，最大允许1000 在第 " + std::to_string(node->line) + " 行");
+                            }
+                            dimensions.push_back(size);
+                        } catch (const std::invalid_argument& e) {
+                            throw std::runtime_error("数组大小必须是整数: " + sizeValue + " 在第 " + std::to_string(node->line) + " 行");
+                        } catch (const std::out_of_range& e) {
+                            throw std::runtime_error("数组大小超出范围: " + sizeValue + " 在第 " + std::to_string(node->line) + " 行");
+                        }
+                    }
+                } else if (varDef->arraySizeExpr) {
+                    // 兼容旧代码：只处理第一维
                     std::string sizeValue = evaluate(varDef->arraySizeExpr.get(), scope);
                     try {
                         int size = std::stoi(sizeValue);
@@ -485,23 +691,47 @@ void Interpreter::executeStatement(ASTNode* node, SymbolTable* scope, const std:
                     dimensions.push_back(10); // 默认大小
                 }
                 
-                // 定义数组变量
+                debugOutput("数组 " + varDef->name + " 维度数量: " + std::to_string(dimensions.size()));
+                
+                // 定义数组变量（不初始化数组元素，稍后手动初始化）
                 std::string value = "";
                 if (varDef->initializer) {
                     value = evaluate(varDef->initializer.get(), scope);
                 }
-                scope->defineVariable(varDef->name, varDef->type, value, varDef->line);
+                scope->defineVariable(varDef->name, varDef->type, value, varDef->line, false);
                 
                 // 初始化数组元素
                 std::vector<int> indices(dimensions.size(), 0);
                 bool initialized = true;
                 
+                // 检查是否是大括号初始化列表
+                bool useBraceInit = varDef->initializer && varDef->initializer->type == NodeType::BRACE_INIT_LIST;
+                std::vector<std::string> braceInitValues;
+                if (useBraceInit) {
+                    BraceInitListNode* braceInit = static_cast<BraceInitListNode*>(varDef->initializer.get());
+                    // 递归解析嵌套的初始化列表
+                    std::function<void(BraceInitListNode*, std::vector<std::string>&)> parseBraceInit = 
+                        [&](BraceInitListNode* node, std::vector<std::string>& values) {
+                            for (const auto& element : node->elements) {
+                                if (element->type == NodeType::BRACE_INIT_LIST) {
+                                    parseBraceInit(static_cast<BraceInitListNode*>(element.get()), values);
+                                } else {
+                                    values.push_back(evaluate(element.get(), scope));
+                                }
+                            }
+                        };
+                    parseBraceInit(braceInit, braceInitValues);
+                }
+                
+                int elementIndex = 0;
                 while (initialized) {
                     // 构造元素名称
                     std::string elementName = varDef->name;
                     for (int idx : indices) {
                         elementName += "[" + std::to_string(idx) + "]";
                     }
+                    
+                    debugOutput("定义数组元素: " + elementName);
                     
                     // 根据类型初始化默认值
                     std::string defaultValue = "0";
@@ -515,13 +745,25 @@ void Interpreter::executeStatement(ASTNode* node, SymbolTable* scope, const std:
                         defaultValue = "'";
                     }
                     
-                    scope->defineVariable(elementName, varDef->type, defaultValue, varDef->line);
+                    // 如果是大括号初始化列表，使用列表中的值
+                    if (useBraceInit && elementIndex < static_cast<int>(braceInitValues.size())) {
+                        defaultValue = braceInitValues[elementIndex];
+                    }
+                    
+                    // 手动定义数组元素
+                    scope->defineVariable(elementName, varDef->type, defaultValue, varDef->line, false);
+                    
+                    elementIndex++;
                     
                     // 更新索引
                     int dimIndex = dimensions.size() - 1;
                     while (dimIndex >= 0) {
+                        if (dimIndex >= static_cast<int>(indices.size())) {
+                            initialized = false;
+                            break;
+                        }
                         indices[dimIndex]++;
-                        if (indices[dimIndex] < dimensions[dimIndex]) {
+                        if (dimIndex < static_cast<int>(dimensions.size()) && indices[dimIndex] < dimensions[dimIndex]) {
                             break;
                         }
                         indices[dimIndex] = 0;
@@ -617,9 +859,29 @@ void Interpreter::executeStatement(ASTNode* node, SymbolTable* scope, const std:
                 // 对于结构体数组，构建包含所有元素的数组值
                 std::string value = varDef->type + ":";
                 
+                // 检查是否是大括号初始化列表
+                bool useBraceInit = varDef->initializer && varDef->initializer->type == NodeType::BRACE_INIT_LIST;
+                std::vector<std::string> braceInitValues;
+                if (useBraceInit) {
+                    BraceInitListNode* braceInit = static_cast<BraceInitListNode*>(varDef->initializer.get());
+                    // 递归解析嵌套的初始化列表
+                    std::function<void(BraceInitListNode*, std::vector<std::string>&)> parseBraceInit = 
+                        [&](BraceInitListNode* node, std::vector<std::string>& values) {
+                            for (const auto& element : node->elements) {
+                                if (element->type == NodeType::BRACE_INIT_LIST) {
+                                    parseBraceInit(static_cast<BraceInitListNode*>(element.get()), values);
+                                } else {
+                                    values.push_back(evaluate(element.get(), scope));
+                                }
+                            }
+                        };
+                    parseBraceInit(braceInit, braceInitValues);
+                }
+                
                 // 初始化多维数组中的所有元素
                 std::vector<int> indices(dimensions.size(), 0);
                 bool initialized = true;
+                int elementIndex = 0;
                 
                 while (initialized) {
                     // 构造元素名称
@@ -645,14 +907,25 @@ void Interpreter::executeStatement(ASTNode* node, SymbolTable* scope, const std:
                         // 保留类型前缀，因为结构体成员访问需要类型信息
                     }
                     
+                    // 如果是大括号初始化列表，使用列表中的值
+                    if (useBraceInit && elementIndex < static_cast<int>(braceInitValues.size())) {
+                        elementValue = braceInitValues[elementIndex];
+                    }
+                    
                     // 将元素值添加到数组值中
                     value += elementValue + ";";
+                    
+                    elementIndex++;
                     
                     // 更新索引
                     int dim = dimensions.size() - 1;
                     while (dim >= 0) {
+                        if (dim >= static_cast<int>(indices.size())) {
+                            initialized = false;
+                            break;
+                        }
                         indices[dim]++;
-                        if (indices[dim] < dimensions[dim]) {
+                        if (dim < static_cast<int>(dimensions.size()) && indices[dim] < dimensions[dim]) {
                             break;
                         } else {
                             indices[dim] = 0;
@@ -660,14 +933,72 @@ void Interpreter::executeStatement(ASTNode* node, SymbolTable* scope, const std:
                         }
                     }
                     
-                    // 检查是否完成所有元素的初始化
                     if (dim < 0) {
                         initialized = false;
                     }
                 }
                 
-                // 定义数组变量（使用数组名）
-                scope->defineVariable(arrayName, varDef->type, value, varDef->line);
+                // 定义数组变量（不初始化数组元素，稍后手动初始化）
+                scope->defineVariable(arrayName, varDef->type, value, varDef->line, false);
+                
+                // 手动初始化数组元素
+                indices.assign(dimensions.size(), 0);
+                initialized = true;
+                elementIndex = 0;
+                while (initialized) {
+                    // 构造元素名称
+                    std::string elementName = arrayName;
+                    for (int idx : indices) {
+                        elementName += "[" + std::to_string(idx) + "]";
+                    }
+                    
+                    // 根据类型初始化元素值
+                    std::string elementValue;
+                    if (varDef->type == "整型" || varDef->type == "小数" || varDef->type == "布尔型") {
+                        // 基本类型：初始化为0
+                        elementValue = "0";
+                    } else if (varDef->type == "字符串") {
+                        // 字符串类型：初始化为空字符串
+                        elementValue = "";
+                    } else if (varDef->type == "字符型") {
+                        // 字符类型：初始化为空字符
+                        elementValue = "'";
+                    } else {
+                        // 结构体类型：创建结构体实例
+                        elementValue = scope->createStructInstance(varDef->type, varDef->line);
+                        // 保留类型前缀，因为结构体成员访问需要类型信息
+                    }
+                    
+                    // 如果是大括号初始化列表，使用列表中的值
+                    if (useBraceInit && elementIndex < static_cast<int>(braceInitValues.size())) {
+                        elementValue = braceInitValues[elementIndex];
+                    }
+                    
+                    // 手动定义数组元素
+                    scope->defineVariable(elementName, varDef->type, elementValue, varDef->line, false);
+                    
+                    elementIndex++;
+                    
+                    // 更新索引
+                    int dim = dimensions.size() - 1;
+                    while (dim >= 0) {
+                        if (dim >= static_cast<int>(indices.size())) {
+                            initialized = false;
+                            break;
+                        }
+                        indices[dim]++;
+                        if (dim < static_cast<int>(dimensions.size()) && indices[dim] < dimensions[dim]) {
+                            break;
+                        } else {
+                            indices[dim] = 0;
+                            dim--;
+                        }
+                    }
+                    
+                    if (dim < 0) {
+                        initialized = false;
+                    }
+                }
             } else {
                 // 普通变量定义
                 std::string value = "";
@@ -691,7 +1022,7 @@ void Interpreter::executeStatement(ASTNode* node, SymbolTable* scope, const std:
                     }
                 }
                 
-                scope->defineVariable(varDef->name, varDef->type, value, varDef->line);
+                scope->defineVariable(varDef->name, varDef->type, value, varDef->line, true);
             }
             break;
         }
@@ -775,27 +1106,84 @@ void Interpreter::executeStatement(ASTNode* node, SymbolTable* scope, const std:
         }
         case NodeType::COUT_STATEMENT: {
             CoutStatementNode* coutStmt = static_cast<CoutStatementNode*>(node);
-            std::string value = evaluate(coutStmt->expression.get(), scope);
-            std::cout << value << std::endl;
+            for (const auto& expr : coutStmt->expressions) {
+                std::string value = evaluate(expr.get(), scope);
+                std::cout << value;
+            }
+            std::cout.flush();
+            break;
+        }
+        case NodeType::COUT_NEWLINE_STATEMENT: {
+            std::cout << std::endl;
+            std::cout.flush();
             break;
         }
         case NodeType::CIN_STATEMENT: {
             CinStatementNode* cinStmt = static_cast<CinStatementNode*>(node);
-            // 检查表达式类型
-            if (cinStmt->expression->type != NodeType::IDENTIFIER) {
-                throw std::runtime_error("控制台输入语句必须指定变量名 在第 " + std::to_string(node->line) + " 行");
+            
+            for (const auto& expr : cinStmt->expressions) {
+                if (expr->type == NodeType::IDENTIFIER) {
+                    IdentifierNode* ident = static_cast<IdentifierNode*>(expr.get());
+                    std::string name = ident->name;
+                    
+                    if (!scope->hasVariable(name)) {
+                        throw std::runtime_error("变量未定义: " + name + " 在第 " + std::to_string(node->line) + " 行");
+                    }
+                    
+                    std::string input;
+                    std::cin >> input;
+                    scope->setVariable(name, input, node->line);
+                } else if (expr->type == NodeType::ARRAY_ACCESS) {
+                    ArrayAccessNode* arrayAccess = static_cast<ArrayAccessNode*>(expr.get());
+                    std::string arrayName = arrayAccess->arrayName;
+                    
+                    // 找到数组定义所在的作用域
+                    SymbolTable* arrayScope = scope;
+                    while (arrayScope && !arrayScope->hasVariable(arrayName)) {
+                        arrayScope = arrayScope->getParent();
+                    }
+                    if (!arrayScope) {
+                        throw std::runtime_error("数组未定义: " + arrayName + " 在第 " + std::to_string(node->line) + " 行");
+                    }
+                    
+                    // 计算索引值
+                    std::vector<int> indices;
+                    for (const auto& indexNode : arrayAccess->indices) {
+                        std::string indexValue = evaluate(indexNode.get(), scope);
+                        try {
+                            double indexNum = std::stod(indexValue);
+                            int intIndex = static_cast<int>(indexNum);
+                            if (intIndex < 0) {
+                                throw std::runtime_error("数组索引不能为负数: " + std::to_string(intIndex) + " 在第 " + std::to_string(node->line) + " 行");
+                            }
+                            indices.push_back(intIndex);
+                        } catch (const std::invalid_argument& e) {
+                            throw std::runtime_error("数组索引必须是数字: " + indexValue + " 在第 " + std::to_string(node->line) + " 行");
+                        } catch (...) {
+                            throw std::runtime_error("无效的数组索引: " + indexValue + " 在第 " + std::to_string(node->line) + " 行");
+                        }
+                    }
+                    
+                    // 构造数组元素名称
+                    std::string elementName = arrayName;
+                    for (int idx : indices) {
+                        elementName += "[" + std::to_string(idx) + "]";
+                    }
+                    
+                    // 读取输入
+                    std::string input;
+                    std::cin >> input;
+                    
+                    // 在数组所在作用域中定义或更新变量
+                    if (arrayScope->hasVariable(elementName)) {
+                        arrayScope->setVariable(elementName, input, node->line);
+                    } else {
+                        arrayScope->defineVariable(elementName, "整型", input, node->line, false);
+                    }
+                } else {
+                    throw std::runtime_error("控制台输入语句必须指定变量名或数组元素 在第 " + std::to_string(node->line) + " 行");
+                }
             }
-            IdentifierNode* ident = static_cast<IdentifierNode*>(cinStmt->expression.get());
-            std::string name = ident->name;
-            // 检查变量是否已定义
-            if (!scope->hasVariable(name)) {
-                throw std::runtime_error("变量未定义: " + name + " 在第 " + std::to_string(node->line) + " 行");
-            }
-            // 读取输入
-            std::string input;
-            std::cin >> input;
-            // 将输入值存入变量
-            scope->setVariable(name, input, node->line);
             break;
         }
         case NodeType::FILE_READ_STATEMENT: {
@@ -972,6 +1360,82 @@ void Interpreter::executeStatement(ASTNode* node, SymbolTable* scope, const std:
             }
             break;
         }
+        case NodeType::COMPOUND_ASSIGNMENT: {
+            CompoundAssignmentNode* compoundAssign = static_cast<CompoundAssignmentNode*>(node);
+            std::string name = compoundAssign->name;
+            std::string exprValue = evaluate(compoundAssign->expression.get(), scope);
+            
+            // 检查变量是否存在
+            if (!scope->hasVariable(name)) {
+                throw std::runtime_error("变量未定义: " + name + " 在第 " + std::to_string(node->line) + " 行");
+            }
+            
+            // 获取变量当前值
+            std::string currentValue = scope->getVariable(name, node->line);
+            std::string varType = scope->getVariableType(name);
+            
+            // 执行复合赋值运算
+            std::string resultValue;
+            bool isNumeric = (varType == "整型" || varType == "小数");
+            
+            if (isNumeric) {
+                // 数字类型处理
+                double left = std::stod(currentValue);
+                double right = std::stod(exprValue);
+                double result;
+                
+                if (compoundAssign->op == "+") {
+                    result = left + right;
+                } else if (compoundAssign->op == "-") {
+                    result = left - right;
+                } else if (compoundAssign->op == "*") {
+                    result = left * right;
+                } else if (compoundAssign->op == "/") {
+                    if (right == 0) {
+                        throw std::runtime_error("除零错误 在第 " + std::to_string(node->line) + " 行");
+                    }
+                    result = left / right;
+                } else if (compoundAssign->op == "%") {
+                    result = static_cast<long long>(left) % static_cast<long long>(right);
+                    resultValue = std::to_string(static_cast<long long>(result));
+                    scope->setVariable(name, resultValue, node->line);
+                    break;
+                } else if (compoundAssign->op == "^") {
+                    result = std::pow(left, right);
+                    resultValue = std::to_string(result);
+                    scope->setVariable(name, resultValue, node->line);
+                    break;
+                } else {
+                    throw std::runtime_error("不支持的复合赋值运算符: " + compoundAssign->op + " 在第 " + std::to_string(node->line) + " 行");
+                }
+                
+                // 根据类型格式化结果
+                if (varType == "整型") {
+                    resultValue = std::to_string(static_cast<long long>(result));
+                } else {
+                    resultValue = std::to_string(result);
+                }
+            } else {
+                // 字符串类型处理（+=）
+                if (compoundAssign->op == "+") {
+                    resultValue = currentValue;
+                    // 去掉两端的引号（如果有）
+                    if (resultValue.length() >= 2 && resultValue.front() == '"' && resultValue.back() == '"') {
+                        resultValue = resultValue.substr(1, resultValue.length() - 2);
+                    }
+                    std::string rightValue = exprValue;
+                    if (rightValue.length() >= 2 && rightValue.front() == '"' && rightValue.back() == '"') {
+                        rightValue = rightValue.substr(1, rightValue.length() - 2);
+                    }
+                    resultValue = "\"" + resultValue + rightValue + "\"";
+                } else {
+                    throw std::runtime_error("字符串类型不支持复合赋值运算符: " + compoundAssign->op + " 在第 " + std::to_string(node->line) + " 行");
+                }
+            }
+            
+            scope->setVariable(name, resultValue, node->line);
+            break;
+        }
         case NodeType::WHILE_STATEMENT: {
             WhileStatementNode* whileStmt = static_cast<WhileStatementNode*>(node);
             // 循环执行，直到条件为假
@@ -980,7 +1444,13 @@ void Interpreter::executeStatement(ASTNode* node, SymbolTable* scope, const std:
                 if (conditionValue != "真") {
                     break;
                 }
-                executeStatement(whileStmt->body.get(), scope);
+                try {
+                    executeStatement(whileStmt->body.get(), scope);
+                } catch (const ContinueException&) {
+                    continue;
+                } catch (const BreakException&) {
+                    break;
+                }
             }
             break;
         }
@@ -997,7 +1467,17 @@ void Interpreter::executeStatement(ASTNode* node, SymbolTable* scope, const std:
                 if (conditionValue != "真") {
                     break;
                 }
-                executeStatement(forStmt->body.get(), scope);
+                try {
+                    executeStatement(forStmt->body.get(), scope);
+                } catch (const ContinueException&) {
+                    // 执行更新
+                    if (forStmt->update) {
+                        executeStatement(forStmt->update.get(), scope);
+                    }
+                    continue;
+                } catch (const BreakException&) {
+                    break;
+                }
                 // 执行更新
                 if (forStmt->update) {
                     executeStatement(forStmt->update.get(), scope);
@@ -1006,7 +1486,13 @@ void Interpreter::executeStatement(ASTNode* node, SymbolTable* scope, const std:
             
             break;
         }
-
+        case NodeType::BREAK_STATEMENT: {
+            throw BreakException();
+        }
+        case NodeType::CONTINUE_STATEMENT: {
+            throw ContinueException();
+        }
+        
         default:
             // 其他类型的语句，如表达式语句
             evaluate(node, scope);
@@ -1083,6 +1569,18 @@ std::string Interpreter::evaluate(ASTNode* node, SymbolTable* scope) {
                 return result;
             }
             
+            if (functionName == "字符转整型") {
+                if (funcCall->arguments.size() != 1) {
+                    throw std::runtime_error("字符转整型函数需要一个参数 在第 " + std::to_string(node->line) + " 行");
+                }
+                std::string charStr = evaluate(funcCall->arguments[0].get(), scope);
+                if (charStr.empty()) {
+                    return "0";
+                }
+                // 返回字符的ASCII码值
+                return std::to_string(static_cast<int>(charStr[0]));
+            }
+            
             if (functionName == "转小写") {
                 if (funcCall->arguments.size() != 1) {
                     throw std::runtime_error("转小写函数需要一个参数 在第 " + std::to_string(node->line) + " 行");
@@ -1133,6 +1631,15 @@ std::string Interpreter::evaluate(ASTNode* node, SymbolTable* scope) {
                 }
                 std::string intValue = evaluate(funcCall->arguments[0].get(), scope);
                 return intValue;
+            }
+            
+            if (functionName == "字符串拼接") {
+                if (funcCall->arguments.size() != 2) {
+                    throw std::runtime_error("字符串拼接函数需要2个参数 在第 " + std::to_string(node->line) + " 行");
+                }
+                std::string str1 = evaluate(funcCall->arguments[0].get(), scope);
+                std::string str2 = evaluate(funcCall->arguments[1].get(), scope);
+                return str1 + str2;
             }
             
             // 检查函数是否已定义
@@ -1187,11 +1694,16 @@ std::string Interpreter::evaluate(ASTNode* node, SymbolTable* scope) {
             for (size_t i = 0; i < funcDef->parameters.size(); ++i) {
                 std::string paramName = funcDef->parameters[i].second;
                 std::string paramType = funcDef->parameters[i].first;
-                funcScope->defineVariable(paramName, paramType, argumentValues[i], node->line);
+                
+                // 检查是否是数组参数（包含方括号）
+                bool isArrayParam = (paramName.find("[") != std::string::npos && paramName.find("]") != std::string::npos);
+                
+                // 如果是数组参数，不重新初始化数组元素
+                funcScope->defineVariable(paramName, paramType, argumentValues[i], node->line, !isArrayParam);
             }
             
             // 创建一个返回值存储变量
-            funcScope->defineVariable("__return_value", funcDef->returnType, "", node->line);
+            funcScope->defineVariable("__return_value", funcDef->returnType, "", node->line, true);
             
             // 执行函数体
             try {
@@ -1207,7 +1719,7 @@ std::string Interpreter::evaluate(ASTNode* node, SymbolTable* scope) {
                         std::string inferredType = inferType(returnValue);
                         if (inferredType != funcDef->returnType) {
                             delete funcScope; // 清理作用域
-                            throw std::runtime_error("函数 " + functionName + " 返回类型不匹配: 期望 " + funcDef->returnType + "，但实际返回 " + inferredType + " 在第 " + std::to_string(node->line) + " 行");
+                            throw std::runtime_error("函数 " + functionName + " 返回类型不匹配: 期望 " + funcDef->returnType + "，但实际返回 " + inferredType + " 在第 " + std::to_string(funcDef->line) + " 行");
                         }
                     }
                     
@@ -1259,46 +1771,48 @@ std::string Interpreter::evaluate(ASTNode* node, SymbolTable* scope) {
                 throw std::runtime_error("数组维度不匹配 在第 " + std::to_string(node->line) + " 行");
             }
             
-            // 检查数组变量是否存在
-            if (!scope->hasVariable(arrayAccess->arrayName)) {
-                throw std::runtime_error("数组变量未定义: " + arrayAccess->arrayName + " 在第 " + std::to_string(node->line) + " 行");
+            // 构造完整的数组元素变量名：arrayName[index1][index2]...
+            std::string elementName = arrayAccess->arrayName;
+            for (int idx : indices) {
+                elementName += "[" + std::to_string(idx) + "]";
             }
             
-            // 获取数组变量值
-            std::string arrayValue = scope->getVariable(arrayAccess->arrayName, node->line);
+            // 检查变量类型，区分字符串访问和数组访问
+            std::string varType = scope->getVariableType(arrayAccess->arrayName);
             
-            // 从数组值中提取指定索引的元素
-            // 数组格式：类型:值1;值2;值3;...
-            size_t colonPos = arrayValue.find(':');
-            if (colonPos == std::string::npos) {
-                throw std::runtime_error("无效的数组变量格式 在第 " + std::to_string(node->line) + " 行");
+            if (varType == "字符串") {
+                // 这是字符串访问，不是数组访问
+                // 获取字符串变量的值
+                std::string fullString = scope->getVariable(arrayAccess->arrayName, node->line);
+                
+                // 检查索引数量（字符串访问应该只有一个索引）
+                if (indices.size() != 1) {
+                    throw std::runtime_error("字符串访问只能有一个索引 在第 " + std::to_string(node->line) + " 行");
+                }
+                
+                int intIndex = indices[0];
+                if (intIndex < 0) {
+                    throw std::runtime_error("字符串索引不能为负数: " + std::to_string(intIndex) + " 在第 " + std::to_string(node->line) + " 行");
+                }
+                
+                // 检查索引是否超出字符串长度
+                if (intIndex >= static_cast<int>(fullString.length())) {
+                    throw std::runtime_error("字符串索引超出范围: " + std::to_string(intIndex) + " 在第 " + std::to_string(node->line) + " 行");
+                }
+                
+                // 返回字符（作为字符串返回）
+                std::string charStr(1, fullString[intIndex]);
+                return charStr;
+            } else {
+                // 这是真正的数组访问
+                // 检查数组元素变量是否存在
+                if (!scope->hasVariable(elementName)) {
+                    throw std::runtime_error("数组元素未定义: " + elementName + " 在第 " + std::to_string(node->line) + " 行");
+                }
+                
+                // 直接返回数组元素的值
+                return scope->getVariable(elementName, node->line);
             }
-            
-            std::string arrayType = arrayValue.substr(0, colonPos);
-            std::string elements = arrayValue.substr(colonPos + 1);
-            
-            // 解析元素列表
-            std::vector<std::string> elementList;
-            size_t startPos = 0;
-            size_t semicolonPos = elements.find(';');
-            while (semicolonPos != std::string::npos) {
-                elementList.push_back(elements.substr(startPos, semicolonPos - startPos));
-                startPos = semicolonPos + 1;
-                semicolonPos = elements.find(';', startPos);
-            }
-            elementList.push_back(elements.substr(startPos));
-            
-            // 检查索引是否有效
-            if (indices.empty()) {
-                throw std::runtime_error("数组访问必须指定索引 在第 " + std::to_string(node->line) + " 行");
-            }
-            
-            int index = indices[0]; // 目前只支持一维数组
-            if (index < 0 || index >= static_cast<int>(elementList.size())) {
-                throw std::runtime_error("数组索引越界: " + std::to_string(index) + " 在第 " + std::to_string(node->line) + " 行");
-            }
-            
-            return elementList[index];
         }
         case NodeType::STRING_ACCESS: {
             StringAccessNode* stringAccess = static_cast<StringAccessNode*>(node);
@@ -1711,6 +2225,170 @@ std::string Interpreter::evaluate(ASTNode* node, SymbolTable* scope) {
                 return operandIsTrue ? "假" : "真";
             }
             
+            // 处理一元负号运算符
+            if (unaryExpr->op == "-") {
+                // 尝试解析为数字
+                try {
+                    double numValue = std::stod(operand);
+                    // 检查是否是小数
+                    if (operand.find('.') != std::string::npos) {
+                        return std::to_string(-numValue);
+                    } else {
+                        // 整数
+                        return std::to_string(-static_cast<long long>(numValue));
+                    }
+                } catch (...) {
+                    throw std::runtime_error("一元负号运算符只能应用于数字类型 在第 " + std::to_string(node->line) + " 行");
+                }
+            }
+            
+            // 处理一元正号运算符
+            if (unaryExpr->op == "+") {
+                return operand;
+            }
+            
+            // 处理前缀自增运算符
+            if (unaryExpr->op == "前缀++") {
+                // 获取操作数（应该是标识符）
+                if (unaryExpr->operand->type != NodeType::IDENTIFIER) {
+                    throw std::runtime_error("自增运算符只能应用于变量 在第 " + std::to_string(node->line) + " 行");
+                }
+                IdentifierNode* ident = static_cast<IdentifierNode*>(unaryExpr->operand.get());
+                std::string varName = ident->name;
+                
+                if (!scope->hasVariable(varName)) {
+                    throw std::runtime_error("变量未定义: " + varName + " 在第 " + std::to_string(node->line) + " 行");
+                }
+                
+                std::string varType = scope->getVariableType(varName);
+                if (varType != "整型" && varType != "小数") {
+                    throw std::runtime_error("自增运算符只能应用于数字类型 在第 " + std::to_string(node->line) + " 行");
+                }
+                
+                // 获取当前值
+                double currentValue = std::stod(operand);
+                double newValue = currentValue + 1;
+                
+                // 设置新值
+                std::string newValueStr;
+                if (varType == "整型") {
+                    newValueStr = std::to_string(static_cast<long long>(newValue));
+                } else {
+                    newValueStr = std::to_string(newValue);
+                }
+                scope->setVariable(varName, newValueStr, node->line);
+                
+                return newValueStr;
+            }
+            
+            // 处理前缀自减运算符
+            if (unaryExpr->op == "前缀--") {
+                // 获取操作数（应该是标识符）
+                if (unaryExpr->operand->type != NodeType::IDENTIFIER) {
+                    throw std::runtime_error("自减运算符只能应用于变量 在第 " + std::to_string(node->line) + " 行");
+                }
+                IdentifierNode* ident = static_cast<IdentifierNode*>(unaryExpr->operand.get());
+                std::string varName = ident->name;
+                
+                if (!scope->hasVariable(varName)) {
+                    throw std::runtime_error("变量未定义: " + varName + " 在第 " + std::to_string(node->line) + " 行");
+                }
+                
+                std::string varType = scope->getVariableType(varName);
+                if (varType != "整型" && varType != "小数") {
+                    throw std::runtime_error("自减运算符只能应用于数字类型 在第 " + std::to_string(node->line) + " 行");
+                }
+                
+                // 获取当前值
+                double currentValue = std::stod(operand);
+                double newValue = currentValue - 1;
+                
+                // 设置新值
+                std::string newValueStr;
+                if (varType == "整型") {
+                    newValueStr = std::to_string(static_cast<long long>(newValue));
+                } else {
+                    newValueStr = std::to_string(newValue);
+                }
+                scope->setVariable(varName, newValueStr, node->line);
+                
+                return newValueStr;
+            }
+            
+            // 处理后置自增运算符
+            if (unaryExpr->op == "后置++") {
+                // 获取操作数（应该是标识符）
+                if (unaryExpr->operand->type != NodeType::IDENTIFIER) {
+                    throw std::runtime_error("自增运算符只能应用于变量 在第 " + std::to_string(node->line) + " 行");
+                }
+                IdentifierNode* ident = static_cast<IdentifierNode*>(unaryExpr->operand.get());
+                std::string varName = ident->name;
+                
+                if (!scope->hasVariable(varName)) {
+                    throw std::runtime_error("变量未定义: " + varName + " 在第 " + std::to_string(node->line) + " 行");
+                }
+                
+                std::string varType = scope->getVariableType(varName);
+                if (varType != "整型" && varType != "小数") {
+                    throw std::runtime_error("自增运算符只能应用于数字类型 在第 " + std::to_string(node->line) + " 行");
+                }
+                
+                // 获取当前值（作为返回值）
+                std::string oldValue = operand;
+                
+                // 计算新值
+                double currentValue = std::stod(operand);
+                double newValue = currentValue + 1;
+                
+                // 设置新值
+                std::string newValueStr;
+                if (varType == "整型") {
+                    newValueStr = std::to_string(static_cast<long long>(newValue));
+                } else {
+                    newValueStr = std::to_string(newValue);
+                }
+                scope->setVariable(varName, newValueStr, node->line);
+                
+                return oldValue;
+            }
+            
+            // 处理后置自减运算符
+            if (unaryExpr->op == "后置--") {
+                // 获取操作数（应该是标识符）
+                if (unaryExpr->operand->type != NodeType::IDENTIFIER) {
+                    throw std::runtime_error("自减运算符只能应用于变量 在第 " + std::to_string(node->line) + " 行");
+                }
+                IdentifierNode* ident = static_cast<IdentifierNode*>(unaryExpr->operand.get());
+                std::string varName = ident->name;
+                
+                if (!scope->hasVariable(varName)) {
+                    throw std::runtime_error("变量未定义: " + varName + " 在第 " + std::to_string(node->line) + " 行");
+                }
+                
+                std::string varType = scope->getVariableType(varName);
+                if (varType != "整型" && varType != "小数") {
+                    throw std::runtime_error("自减运算符只能应用于数字类型 在第 " + std::to_string(node->line) + " 行");
+                }
+                
+                // 获取当前值（作为返回值）
+                std::string oldValue = operand;
+                
+                // 计算新值
+                double currentValue = std::stod(operand);
+                double newValue = currentValue - 1;
+                
+                // 设置新值
+                std::string newValueStr;
+                if (varType == "整型") {
+                    newValueStr = std::to_string(static_cast<long long>(newValue));
+                } else {
+                    newValueStr = std::to_string(newValue);
+                }
+                scope->setVariable(varName, newValueStr, node->line);
+                
+                return oldValue;
+            }
+            
             return operand;
         }
         case NodeType::BINARY_EXPRESSION: {
@@ -1740,7 +2418,7 @@ std::string Interpreter::evaluate(ASTNode* node, SymbolTable* scope) {
             
             // + 操作符特殊处理：如果是数字则进行数字运算，否则进行字符串拼接
             if (binExpr->op == "+") {
-                if (leftIsNumber && rightIsNumber) {
+                if (leftIsNumber && rightIsNumber && !left.empty() && !right.empty()) {
                     // 两个都是数字，进行数字运算
                     bool leftIsInt = (left.find('.') == std::string::npos);
                     bool rightIsInt = (right.find('.') == std::string::npos);
@@ -1771,7 +2449,32 @@ std::string Interpreter::evaluate(ASTNode* node, SymbolTable* scope) {
                 return (leftTrue || rightTrue) ? "真" : "假";
             }
             
-            // 对于其他操作符，如果任何一个操作数不是数字，抛出错误
+            // 比较运算符处理：支持字符串比较
+            if (binExpr->op == "==" || binExpr->op == "!=" || binExpr->op == "<" || binExpr->op == "<=" || binExpr->op == ">" || binExpr->op == ">=") {
+                // 如果两个操作数都是数字，进行数字比较
+                if (leftIsNumber && rightIsNumber) {
+                    bool result = false;
+                    if (binExpr->op == "==") result = (leftValue == rightValue);
+                    else if (binExpr->op == "!=") result = (leftValue != rightValue);
+                    else if (binExpr->op == "<") result = (leftValue < rightValue);
+                    else if (binExpr->op == "<=") result = (leftValue <= rightValue);
+                    else if (binExpr->op == ">") result = (leftValue > rightValue);
+                    else if (binExpr->op == ">=") result = (leftValue >= rightValue);
+                    return result ? "真" : "假";
+                } else {
+                    // 否则进行字符串比较
+                    bool result = false;
+                    if (binExpr->op == "==") result = (left == right);
+                    else if (binExpr->op == "!=") result = (left != right);
+                    else if (binExpr->op == "<") result = (left < right);
+                    else if (binExpr->op == "<=") result = (left <= right);
+                    else if (binExpr->op == ">") result = (left > right);
+                    else if (binExpr->op == ">=") result = (left >= right);
+                    return result ? "真" : "假";
+                }
+            }
+            
+            // 对于其他算术操作符，如果任何一个操作数不是数字，抛出错误
             if (!leftIsNumber || !rightIsNumber) {
                 throw std::runtime_error("非数字操作数: " + left + " " + binExpr->op + " " + right + " 在第 " + std::to_string(binExpr->line) + " 行");
             }
@@ -1870,6 +2573,82 @@ std::string Interpreter::evaluate(ASTNode* node, SymbolTable* scope) {
             }
             return value;
         }
+        case NodeType::COMPOUND_ASSIGNMENT: {
+            CompoundAssignmentNode* compoundAssign = static_cast<CompoundAssignmentNode*>(node);
+            std::string name = compoundAssign->name;
+            std::string exprValue = evaluate(compoundAssign->expression.get(), scope);
+            
+            // 检查变量是否存在
+            if (!scope->hasVariable(name)) {
+                throw std::runtime_error("变量未定义: " + name + " 在第 " + std::to_string(node->line) + " 行");
+            }
+            
+            // 获取变量当前值
+            std::string currentValue = scope->getVariable(name, node->line);
+            std::string varType = scope->getVariableType(name);
+            
+            // 执行复合赋值运算
+            std::string resultValue;
+            bool isNumeric = (varType == "整型" || varType == "小数");
+            
+            if (isNumeric) {
+                // 数字类型处理
+                double left = std::stod(currentValue);
+                double right = std::stod(exprValue);
+                double result;
+                
+                if (compoundAssign->op == "+") {
+                    result = left + right;
+                } else if (compoundAssign->op == "-") {
+                    result = left - right;
+                } else if (compoundAssign->op == "*") {
+                    result = left * right;
+                } else if (compoundAssign->op == "/") {
+                    if (right == 0) {
+                        throw std::runtime_error("除零错误 在第 " + std::to_string(node->line) + " 行");
+                    }
+                    result = left / right;
+                } else if (compoundAssign->op == "%") {
+                    result = static_cast<long long>(left) % static_cast<long long>(right);
+                    resultValue = std::to_string(static_cast<long long>(result));
+                    scope->setVariable(name, resultValue, node->line);
+                    return resultValue;
+                } else if (compoundAssign->op == "^") {
+                    result = std::pow(left, right);
+                    resultValue = std::to_string(result);
+                    scope->setVariable(name, resultValue, node->line);
+                    return resultValue;
+                } else {
+                    throw std::runtime_error("不支持的复合赋值运算符: " + compoundAssign->op + " 在第 " + std::to_string(node->line) + " 行");
+                }
+                
+                // 根据类型格式化结果
+                if (varType == "整型") {
+                    resultValue = std::to_string(static_cast<long long>(result));
+                } else {
+                    resultValue = std::to_string(result);
+                }
+            } else {
+                // 字符串类型处理（+=）
+                if (compoundAssign->op == "+") {
+                    resultValue = currentValue;
+                    // 去掉两端的引号（如果有）
+                    if (resultValue.length() >= 2 && resultValue.front() == '"' && resultValue.back() == '"') {
+                        resultValue = resultValue.substr(1, resultValue.length() - 2);
+                    }
+                    std::string rightValue = exprValue;
+                    if (rightValue.length() >= 2 && rightValue.front() == '"' && rightValue.back() == '"') {
+                        rightValue = rightValue.substr(1, rightValue.length() - 2);
+                    }
+                    resultValue = "\"" + resultValue + rightValue + "\"";
+                } else {
+                    throw std::runtime_error("字符串类型不支持复合赋值运算符: " + compoundAssign->op + " 在第 " + std::to_string(node->line) + " 行");
+                }
+            }
+            
+            scope->setVariable(name, resultValue, node->line);
+            return resultValue;
+        }
         case NodeType::ARRAY_ASSIGNMENT: {
             ArrayAssignmentNode* assign = static_cast<ArrayAssignmentNode*>(node);
             std::string value = evaluate(assign->expression.get(), scope);
@@ -1905,7 +2684,7 @@ std::string Interpreter::evaluate(ASTNode* node, SymbolTable* scope) {
             // 在当前作用域中定义或更新变量
             if (!scope->hasVariable(elementName)) {
                 // 如果没有定义，先定义它
-                scope->defineVariable(elementName, "整型", value, node->line);
+                scope->defineVariable(elementName, "整型", value, node->line, true);
             } else {
                 // 如果已经定义，更新它的值
                 scope->setVariable(elementName, value, node->line);
@@ -1916,6 +2695,32 @@ std::string Interpreter::evaluate(ASTNode* node, SymbolTable* scope) {
             // 执行系统命令行表达式，返回命令执行结果
             SystemCmdExpressionNode* cmdExpr = static_cast<SystemCmdExpressionNode*>(node);
             std::string result = executeSystemCommandExpression(cmdExpr->commandExpr.get(), scope, node->line);
+            return result;
+        }
+        case NodeType::BRACE_INIT_LIST: {
+            // 处理大括号初始化列表
+            BraceInitListNode* braceInit = static_cast<BraceInitListNode*>(node);
+            std::string result = "";
+            
+            for (size_t i = 0; i < braceInit->elements.size(); i++) {
+                std::string elementValue = evaluate(braceInit->elements[i].get(), scope);
+                
+                // 检查是否是嵌套的大括号初始化列表
+                if (braceInit->elements[i]->type == NodeType::BRACE_INIT_LIST) {
+                    // 嵌套的初始化列表，用分号分隔
+                    if (i > 0) {
+                        result += ";";
+                    }
+                    result += elementValue;
+                } else {
+                    // 普通元素，用逗号分隔
+                    if (i > 0) {
+                        result += ",";
+                    }
+                    result += elementValue;
+                }
+            }
+            
             return result;
         }
         default:
@@ -1983,7 +2788,7 @@ void Interpreter::importFile(const std::string& filePath, int line) {
                         }
                     }
                     
-                    globalScope->defineVariable(varDef->name, varDef->type, value, stmt->line);
+                    globalScope->defineVariable(varDef->name, varDef->type, value, stmt->line, true);
                 } else if (stmt->type == NodeType::STATEMENT_LIST) {
                     // 处理语句列表（包含多个变量定义）
                     StatementListNode* stmtList = static_cast<StatementListNode*>(stmt.get());
@@ -2002,7 +2807,7 @@ void Interpreter::importFile(const std::string& filePath, int line) {
                                 }
                             }
                             
-                            globalScope->defineVariable(varDef->name, varDef->type, value, subStmt->line);
+                            globalScope->defineVariable(varDef->name, varDef->type, value, subStmt->line, true);
                         }
                     }
                 } else if (stmt->type == NodeType::FUNCTION_DEF) {

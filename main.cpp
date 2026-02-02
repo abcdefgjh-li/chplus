@@ -37,7 +37,7 @@ void setChineseLocale() {
     
     // 只在Windows系统上设置控制台编码为UTF-8
 #ifdef _WIN32
-    system("chcp 65001");
+    system("chcp 65001 >nul 2>&1");
 #endif
 }
 
@@ -87,7 +87,7 @@ int main(int argc, char* argv[]) {
     bool noFormat = false;
     bool autoFormat = false; // -a 参数
     bool debugMode = false;  // -d 参数
-    bool compileToHex = false; // -x 参数：编译为16进制汇编二进制
+    bool compileToHex = false; // -x 参数：编译为16进制汇编二进制文件
     bool executeHex = false; // -r 参数：执行16进制汇编二进制文件
     std::string filename;
     std::string outputFile;
@@ -204,6 +204,7 @@ int main(int argc, char* argv[]) {
         
         // 语法分析
         Parser parser(tokens);
+        parser.setDebugMode(debugMode);
         auto program = parser.parse();
         
         // 执行
@@ -228,6 +229,9 @@ int main(int argc, char* argv[]) {
         
     } catch (const std::exception& e) {
         std::cerr << "错误: " << e.what() << std::endl;
+        return 1;
+    } catch (...) {
+        std::cerr << "未知错误: 程序发生未捕获的异常（可能是内存访问错误）" << std::endl;
         return 1;
     }
     

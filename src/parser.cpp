@@ -1,9 +1,10 @@
 #include "../include/parser.h"
 #include <stdexcept>
+#include <iostream>
 
 // 构造函数
 Parser::Parser(const std::vector<Token>& tokens)
-    : tokens(tokens), current(0) {}
+    : tokens(tokens), current(0), debugMode(false) {}
 
 // 检查当前token是否匹配指定类型
 bool Parser::match(TokenType type) {
@@ -96,6 +97,15 @@ std::unique_ptr<ASTNode> Parser::parseStatement() {
         match(TokenType::STRUCT)) {
         // 类型已经被消费，检查下一个token是否是标识符或主函数关键字
         if (match(TokenType::IDENTIFIER) || match(TokenType::MAIN)) {
+            // 如果刚才消费的是"定义"关键字，这实际上是变量定义的一部分，回退并使用变量定义逻辑
+            if (previous().value == "定义") {
+                // 回退所有消耗的token
+                current -= 3;
+                advance();
+                // 现在当前token应该是"定义"，调用parseVariableDef()
+                return parseVariableDef();
+            }
+            
             // 检查是否是左括号
             if (match(TokenType::LPAREN)) {
                 // 回退到类型token之前，使用parseFunctionDefCommon解析
@@ -124,6 +134,9 @@ std::unique_ptr<ASTNode> Parser::parseStatement() {
     }
     if (match(TokenType::CIN)) {
         return parseCinStatement();
+    }
+    if (match(TokenType::COUT_NEWLINE)) {
+        return parseCoutNewlineStatement();
     }
     if (match(TokenType::LBRACE)) {
         return parseStatementList();
@@ -154,6 +167,12 @@ std::unique_ptr<ASTNode> Parser::parseStatement() {
     }
     if (match(TokenType::IMPORT)) {
         return parseImportStatement();
+    }
+    if (match(TokenType::BREAK)) {
+        return parseBreakStatement();
+    }
+    if (match(TokenType::CONTINUE)) {
+        return parseContinueStatement();
     }
     
     // 解析表达式语句
@@ -226,6 +245,33 @@ std::unique_ptr<ASTNode> Parser::parseVariableDef(bool consumeSemicolon) {
     int line = previous().line;
     int column = previous().column;
     
+    // 检查是否是空定义语法：定义 变量名 = 值;
+    // 如果下一个token是标识符，则说明是空定义
+    if (peek().type == TokenType::IDENTIFIER) {
+        // 空定义语法：定义 变量名 = 值;
+        Token nameToken = peek();
+        advance(); // 消费变量名
+        std::string name = nameToken.value;
+        
+        // 必须有赋值
+        if (!match(TokenType::ASSIGN)) {
+            throw std::runtime_error("空定义必须赋值 在第 " + std::to_string(line) + " 行");
+        }
+        
+        // 解析表达式
+        auto initializer = parseExpression();
+        
+        // 根据表达式类型推断变量类型
+        std::string inferredType = inferExpressionType(initializer.get());
+        
+        if (consumeSemicolon) {
+            consume(TokenType::SEMICOLON, "变量定义必须以分号结束");
+        }
+        
+        return std::make_unique<VariableDefNode>(inferredType, name, false, nullptr, std::move(initializer), line, column);
+    }
+    
+    // 原来的带括号的定义语法：定义(类型) 变量名 = 值;
     consume(TokenType::LPAREN, "变量定义必须以 '(' 开始");
     
     // 解析类型
@@ -322,6 +368,28 @@ std::unique_ptr<ASTNode> Parser::parseVariableDef(bool consumeSemicolon) {
                 std::string paramName = paramNameToken.value;
                 advance(); // 消费参数名token
                 
+                // 检查是否是数组参数
+                bool isArrayParam = false;
+                std::vector<int> arrayDimensions;
+                while (match(TokenType::LBRACKET)) {
+                    isArrayParam = true;
+                    Token sizeToken = peek();
+                    if (sizeToken.type == TokenType::INTEGER_LITERAL) {
+                        advance();
+                        arrayDimensions.push_back(std::stoi(sizeToken.value));
+                    } else {
+                        throw std::runtime_error("数组参数必须指定大小 在第 " + std::to_string(sizeToken.line) + " 行");
+                    }
+                    consume(TokenType::RBRACKET, "数组参数定义必须以 ']' 结束");
+                }
+                
+                // 如果是数组参数，将维度信息附加到参数名中
+                if (isArrayParam) {
+                    for (int dim : arrayDimensions) {
+                        paramName += "[" + std::to_string(dim) + "]";
+                    }
+                }
+                
                 params.push_back({paramType, paramName});
             } else {
                 throw std::runtime_error("函数参数必须使用 '定义(类型) 名字' 语法 在第 " + std::to_string(paramToken.line) + " 行");
@@ -365,6 +433,28 @@ std::unique_ptr<ASTNode> Parser::parseVariableDef(bool consumeSemicolon) {
                     std::string nextParamName = nextParamNameToken.value;
                     advance(); // 消费参数名token
                     
+                    // 检查是否是数组参数
+                    bool isArrayParam = false;
+                    std::vector<int> arrayDimensions;
+                    while (match(TokenType::LBRACKET)) {
+                        isArrayParam = true;
+                        Token sizeToken = peek();
+                        if (sizeToken.type == TokenType::INTEGER_LITERAL) {
+                            advance();
+                            arrayDimensions.push_back(std::stoi(sizeToken.value));
+                        } else {
+                            throw std::runtime_error("数组参数必须指定大小 在第 " + std::to_string(sizeToken.line) + " 行");
+                        }
+                        consume(TokenType::RBRACKET, "数组参数定义必须以 ']' 结束");
+                    }
+                    
+                    // 如果是数组参数，将维度信息附加到参数名中
+                    if (isArrayParam) {
+                        for (int dim : arrayDimensions) {
+                            nextParamName += "[" + std::to_string(dim) + "]";
+                        }
+                    }
+                    
                     params.push_back({nextParamType, nextParamName});
                 } else {
                     throw std::runtime_error("函数参数必须使用 '定义(类型) 名字' 语法 在第 " + std::to_string(nextParamToken.line) + " 行");
@@ -388,6 +478,8 @@ std::unique_ptr<ASTNode> Parser::parseVariableDef(bool consumeSemicolon) {
         bool isArray = false;
         int arraySize = 0;
         int dimensionCount = 0;
+        std::vector<std::unique_ptr<ASTNode>> arraySizeExprs;
+        
         if (match(TokenType::LBRACKET)) {
             isArray = true;
             // 支持多维数组定义
@@ -397,7 +489,7 @@ std::unique_ptr<ASTNode> Parser::parseVariableDef(bool consumeSemicolon) {
             Token sizeToken = peek();
             if (sizeToken.type == TokenType::INTEGER_LITERAL) {
                 advance(); // 消费数字字面量
-                name += "[" + sizeToken.value + "]";
+                arraySizeExprs.push_back(std::make_unique<LiteralNode>(sizeToken.value, "整数", sizeToken.line, sizeToken.column));
             } else {
                 // 消费表达式（数组大小必须是常量表达式）
                 parseExpression();
@@ -414,7 +506,7 @@ std::unique_ptr<ASTNode> Parser::parseVariableDef(bool consumeSemicolon) {
                 Token additionalSizeToken = peek();
                 if (additionalSizeToken.type == TokenType::INTEGER_LITERAL) {
                     advance(); // 消费数字字面量
-                    name += "[" + additionalSizeToken.value + "]";
+                    arraySizeExprs.push_back(std::make_unique<LiteralNode>(additionalSizeToken.value, "整数", additionalSizeToken.line, additionalSizeToken.column));
                 } else {
                     // 消费表达式（数组大小必须是常量表达式）
                     parseExpression();
@@ -429,25 +521,15 @@ std::unique_ptr<ASTNode> Parser::parseVariableDef(bool consumeSemicolon) {
         if (match(TokenType::ASSIGN)) {
             // 检查是否是数组初始化（花括号列表）
             if (peek().type == TokenType::LBRACE) {
-                advance(); // 消费左花括号
-                // 简单处理：将花括号内的内容作为字符串处理
-                std::string arrayValues = "";
-                while (peek().type != TokenType::RBRACE && !isAtEnd()) {
-                    if (peek().type == TokenType::INTEGER_LITERAL) {
-                        arrayValues += previous().value;
-                    } else if (peek().type == TokenType::COMMA) {
-                        arrayValues += ",";
-                    }
-                    advance();
-                }
-                consume(TokenType::RBRACE, "数组初始化必须以 '}' 结束");
-                // 创建一个字面量节点来表示数组初始化值
-                initializer = std::make_unique<LiteralNode>(arrayValues, "数组", line, column);
+                initializer = parseBraceInitList();
             } else {
                 initializer = parseExpression();
             }
         }
-        varDefList->statements.push_back(std::make_unique<VariableDefNode>(type, name, std::move(initializer), line, column));
+        
+        auto varDef = std::make_unique<VariableDefNode>(type, name, isArray, nullptr, std::move(initializer), line, column);
+        varDef->arraySizeExprs = std::move(arraySizeExprs);
+        varDefList->statements.push_back(std::move(varDef));
         
         // 处理后续变量
         while (match(TokenType::COMMA)) {
@@ -455,11 +537,15 @@ std::unique_ptr<ASTNode> Parser::parseVariableDef(bool consumeSemicolon) {
             if (peek().type == TokenType::IDENTIFIER) {
                 advance(); // 消费标识符
                 std::string varName = previous().value;
+                int varNameLine = previous().line;
+                int varNameColumn = previous().column;
                 
                 // 检查是否是数组定义
                 bool varIsArray = false;
                 int varArraySize = 0;
                 int varDimensionCount = 0;
+                std::vector<std::unique_ptr<ASTNode>> varArraySizeExprs;
+                
                 if (match(TokenType::LBRACKET)) {
                     varIsArray = true;
                     // 支持多维数组定义
@@ -469,7 +555,7 @@ std::unique_ptr<ASTNode> Parser::parseVariableDef(bool consumeSemicolon) {
                     Token sizeToken = peek();
                     if (sizeToken.type == TokenType::INTEGER_LITERAL) {
                         advance(); // 消费数字字面量
-                        varName += "[" + sizeToken.value + "]";
+                        varArraySizeExprs.push_back(std::make_unique<LiteralNode>(sizeToken.value, "整数", sizeToken.line, sizeToken.column));
                     } else {
                         // 消费表达式（数组大小必须是常量表达式）
                         parseExpression();
@@ -486,7 +572,7 @@ std::unique_ptr<ASTNode> Parser::parseVariableDef(bool consumeSemicolon) {
                         Token additionalSizeToken = peek();
                         if (additionalSizeToken.type == TokenType::INTEGER_LITERAL) {
                             advance(); // 消费数字字面量
-                            varName += "[" + additionalSizeToken.value + "]";
+                            varArraySizeExprs.push_back(std::make_unique<LiteralNode>(additionalSizeToken.value, "整数", additionalSizeToken.line, additionalSizeToken.column));
                         } else {
                             // 消费表达式（数组大小必须是常量表达式）
                             parseExpression();
@@ -502,25 +588,15 @@ std::unique_ptr<ASTNode> Parser::parseVariableDef(bool consumeSemicolon) {
                 if (match(TokenType::ASSIGN)) {
                     // 检查是否是数组初始化（花括号列表）
                     if (peek().type == TokenType::LBRACE) {
-                        advance(); // 消费左花括号
-                        // 简单处理：将花括号内的内容作为字符串处理
-                        std::string arrayValues = "";
-                        while (peek().type != TokenType::RBRACE && !isAtEnd()) {
-                            if (peek().type == TokenType::INTEGER_LITERAL) {
-                                arrayValues += previous().value;
-                            } else if (peek().type == TokenType::COMMA) {
-                                arrayValues += ",";
-                            }
-                            advance();
-                        }
-                        consume(TokenType::RBRACE, "数组初始化必须以 '}' 结束");
-                        // 创建一个字面量节点来表示数组初始化值
-                        init = std::make_unique<LiteralNode>(arrayValues, "数组", previous().line, previous().column);
+                        init = parseBraceInitList();
                     } else {
                         init = parseExpression();
                     }
                 }
-                varDefList->statements.push_back(std::make_unique<VariableDefNode>(type, varName, std::move(init), previous().line, previous().column));
+                
+                auto varDef = std::make_unique<VariableDefNode>(type, varName, varIsArray, nullptr, std::move(init), varNameLine, varNameColumn);
+                varDef->arraySizeExprs = std::move(varArraySizeExprs);
+                varDefList->statements.push_back(std::move(varDef));
             } else {
                 throw std::runtime_error("变量定义必须指定变量名 在第 " + std::to_string(peek().line) + " 行");
             }
@@ -678,6 +754,30 @@ std::unique_ptr<ASTNode> Parser::parseFactor() {
         return std::make_unique<UnaryExpressionNode>("!", std::move(expr), previous().line, previous().column);
     }
     
+    // 处理前缀自增运算符
+    if (match(TokenType::INCREMENT)) {
+        auto expr = parseFactor();
+        return std::make_unique<UnaryExpressionNode>("前缀++", std::move(expr), previous().line, previous().column);
+    }
+    
+    // 处理前缀自减运算符
+    if (match(TokenType::DECREMENT)) {
+        auto expr = parseFactor();
+        return std::make_unique<UnaryExpressionNode>("前缀--", std::move(expr), previous().line, previous().column);
+    }
+    
+    // 处理一元负号运算符
+    if (match(TokenType::MINUS)) {
+        auto expr = parseFactor();
+        return std::make_unique<UnaryExpressionNode>("-", std::move(expr), previous().line, previous().column);
+    }
+    
+    // 处理一元正号运算符
+    if (match(TokenType::PLUS)) {
+        auto expr = parseFactor();
+        return expr;
+    }
+    
     auto expr = parsePrimary();
     
     while (match(TokenType::PLUS) || match(TokenType::MINUS)) {
@@ -691,13 +791,6 @@ std::unique_ptr<ASTNode> Parser::parseFactor() {
 
 // 解析基本表达式
 std::unique_ptr<ASTNode> Parser::parsePrimary() {
-    // 处理负数字面量
-    if (match(TokenType::MINUS)) {
-        if (match(TokenType::INTEGER_LITERAL)) {
-            return std::make_unique<LiteralNode>("-" + previous().value, "整数", previous().line, previous().column);
-        }
-    }
-    
     if (match(TokenType::INTEGER_LITERAL)) {
         return std::make_unique<LiteralNode>(previous().value, "整数", previous().line, previous().column);
     }
@@ -709,6 +802,9 @@ std::unique_ptr<ASTNode> Parser::parsePrimary() {
     }
     if (match(TokenType::CHAR_LITERAL)) {
         return std::make_unique<LiteralNode>(previous().value, "字符型", previous().line, previous().column);
+    }
+    if (match(TokenType::LBRACE)) {
+        return parseBraceInitList();
     }
     if (match(TokenType::IDENTIFIER)) {
         std::string name = previous().value;
@@ -737,24 +833,24 @@ std::unique_ptr<ASTNode> Parser::parsePrimary() {
                 consume(TokenType::RBRACKET, "数组访问必须以 ']' 结束");
             }
             
-            // 创建数组访问节点
-            auto arrayAccess = std::make_unique<ArrayAccessNode>(name, std::move(indices), previous().line, previous().column);
+            // 创建通用访问节点（在语义分析阶段确定具体类型）
+            auto accessNode = std::make_unique<ArrayAccessNode>(name, std::move(indices), previous().line, previous().column);
             
             // 检查是否是数组访问赋值
             if (match(TokenType::ASSIGN)) {
                 auto expr = parseExpression();
                 // 创建多维数组访问赋值节点
-                return std::make_unique<ArrayAssignmentNode>(name, std::move(arrayAccess->indices), std::move(expr), previous().line, previous().column);
+                return std::make_unique<ArrayAssignmentNode>(name, std::move(accessNode->indices), std::move(expr), previous().line, previous().column);
             }
             
             // 检查是否还有结构体成员访问
             if (match(TokenType::DOT)) {
                 consume(TokenType::IDENTIFIER, "必须指定成员名称");
                 std::string memberName = previous().value;
-                return std::make_unique<StructMemberAccessNode>(std::move(arrayAccess), memberName, previous().line, previous().column);
+                return std::make_unique<StructMemberAccessNode>(std::move(accessNode), memberName, previous().line, previous().column);
             }
             
-            return arrayAccess;
+            return accessNode;
         }
         
         // 检查是否是函数调用
@@ -787,9 +883,47 @@ std::unique_ptr<ASTNode> Parser::parsePrimary() {
         if (match(TokenType::ASSIGN)) {
             auto expr = parseExpression();
             return std::make_unique<AssignmentNode>(name, std::move(expr), previous().line, previous().column);
-        } else {
-            return std::make_unique<IdentifierNode>(name, previous().line, previous().column);
         }
+        
+        // 检查是否是复合赋值运算符
+        if (match(TokenType::COMPOUND_ADD)) {
+            auto expr = parseExpression();
+            return std::make_unique<CompoundAssignmentNode>(name, "+", std::move(expr), previous().line, previous().column);
+        }
+        if (match(TokenType::COMPOUND_SUB)) {
+            auto expr = parseExpression();
+            return std::make_unique<CompoundAssignmentNode>(name, "-", std::move(expr), previous().line, previous().column);
+        }
+        if (match(TokenType::COMPOUND_MUL)) {
+            auto expr = parseExpression();
+            return std::make_unique<CompoundAssignmentNode>(name, "*", std::move(expr), previous().line, previous().column);
+        }
+        if (match(TokenType::COMPOUND_DIV)) {
+            auto expr = parseExpression();
+            return std::make_unique<CompoundAssignmentNode>(name, "/", std::move(expr), previous().line, previous().column);
+        }
+        if (match(TokenType::COMPOUND_MOD)) {
+            auto expr = parseExpression();
+            return std::make_unique<CompoundAssignmentNode>(name, "%", std::move(expr), previous().line, previous().column);
+        }
+        if (match(TokenType::COMPOUND_POW)) {
+            auto expr = parseExpression();
+            return std::make_unique<CompoundAssignmentNode>(name, "^", std::move(expr), previous().line, previous().column);
+        }
+        
+        // 检查是否是后置自增/自减
+        if (match(TokenType::INCREMENT)) {
+            // 后置自增：a++
+            auto expr = std::make_unique<IdentifierNode>(name, previous().line, previous().column);
+            return std::make_unique<UnaryExpressionNode>("后置++", std::move(expr), previous().line, previous().column);
+        }
+        if (match(TokenType::DECREMENT)) {
+            // 后置自减：a--
+            auto expr = std::make_unique<IdentifierNode>(name, previous().line, previous().column);
+            return std::make_unique<UnaryExpressionNode>("后置--", std::move(expr), previous().line, previous().column);
+        }
+        
+        return std::make_unique<IdentifierNode>(name, previous().line, previous().column);
     }
     if (match(TokenType::LPAREN)) {
         auto expr = parseExpression();
@@ -826,11 +960,30 @@ std::unique_ptr<ASTNode> Parser::parseCoutStatement() {
     int column = previous().column;
     
     consume(TokenType::LPAREN, "控制台输出必须以 '(' 开始");
-    auto expr = parseExpression();
+    
+    std::vector<std::unique_ptr<ASTNode>> expressions;
+    expressions.push_back(parseExpression());
+    
+    while (match(TokenType::COMMA)) {
+        expressions.push_back(parseExpression());
+    }
+    
     consume(TokenType::RPAREN, "控制台输出必须以 ')' 结束");
     consume(TokenType::SEMICOLON, "语句必须以分号结束");
     
-    return std::make_unique<CoutStatementNode>(std::move(expr), line, column);
+    return std::make_unique<CoutStatementNode>(std::move(expressions), line, column);
+}
+
+// 解析控制台换行语句
+std::unique_ptr<ASTNode> Parser::parseCoutNewlineStatement() {
+    int line = previous().line;
+    int column = previous().column;
+    
+    consume(TokenType::LPAREN, "控制台换行必须以 '(' 开始");
+    consume(TokenType::RPAREN, "控制台换行必须以 ')' 结束");
+    consume(TokenType::SEMICOLON, "语句必须以分号结束");
+    
+    return std::make_unique<CoutNewlineStatementNode>(line, column);
 }
 
 // 解析控制台输入语句
@@ -839,11 +992,18 @@ std::unique_ptr<ASTNode> Parser::parseCinStatement() {
     int column = previous().column;
     
     consume(TokenType::LPAREN, "控制台输入必须以 '(' 开始");
-    auto expr = parseExpression();
+    
+    std::vector<std::unique_ptr<ASTNode>> expressions;
+    expressions.push_back(parseExpression());
+    
+    while (match(TokenType::COMMA)) {
+        expressions.push_back(parseExpression());
+    }
+    
     consume(TokenType::RPAREN, "控制台输入必须以 ')' 结束");
     consume(TokenType::SEMICOLON, "语句必须以分号结束");
     
-    return std::make_unique<CinStatementNode>(std::move(expr), line, column);
+    return std::make_unique<CinStatementNode>(std::move(expressions), line, column);
 }
 
 // 解析while循环语句
@@ -1110,8 +1270,7 @@ std::unique_ptr<ASTNode> Parser::parseStructDefinition(int line, int column) {
 
 // 解析函数定义的通用处理
 std::unique_ptr<ASTNode> Parser::parseFunctionDefCommon(const std::string& type, const std::string& name, int line, int column) {
-    // 调试信息
-    std::cout << "[解析器调试] 解析函数定义: " << name << "(" << std::endl;
+    debugOutput("解析函数定义: " + name + "(");
     
     // 解析参数列表
     std::vector<std::pair<std::string, std::string>> params;
@@ -1221,7 +1380,7 @@ std::unique_ptr<ASTNode> Parser::parseVariableDefCommon(const std::string& type,
     
     // 处理第一个变量
     bool isArray = false;
-    std::unique_ptr<ASTNode> arraySizeExpr = nullptr;
+    std::vector<std::unique_ptr<ASTNode>> arraySizeExprs;
     int dimensionCount = 0;
     if (match(TokenType::LBRACKET)) {
         isArray = true;
@@ -1230,13 +1389,13 @@ std::unique_ptr<ASTNode> Parser::parseVariableDefCommon(const std::string& type,
         // 解析数组大小 - 支持动态表达式
         if (match(TokenType::INTEGER_LITERAL)) {
             // 兼容整数常量
-            arraySizeExpr = std::make_unique<LiteralNode>(previous().value, "整数", previous().line, previous().column);
+            arraySizeExprs.push_back(std::make_unique<LiteralNode>(previous().value, "整数", previous().line, previous().column));
         } else if (peek().type == TokenType::RBRACKET) {
             // 空数组
-            arraySizeExpr = nullptr;
+            arraySizeExprs.push_back(nullptr);
         } else {
             // 支持动态表达式
-            arraySizeExpr = parseExpression();
+            arraySizeExprs.push_back(parseExpression());
         }
         
         // 继续解析多维数组
@@ -1248,14 +1407,14 @@ std::unique_ptr<ASTNode> Parser::parseVariableDefCommon(const std::string& type,
             
             // 解析维度大小 - 支持动态表达式
             if (match(TokenType::INTEGER_LITERAL)) {
-                // 兼容整数常量 - 创建一个LiteralNode而不是转换int
-                // 这里不需要处理，因为主要是第一维的大小表达式
+                // 兼容整数常量
+                arraySizeExprs.push_back(std::make_unique<LiteralNode>(previous().value, "整数", previous().line, previous().column));
             } else if (peek().type == TokenType::RBRACKET) {
                 // 空维度
+                arraySizeExprs.push_back(nullptr);
             } else {
                 // 支持动态表达式
-                auto dimExpr = parseExpression();
-                (void)dimExpr; // 忽略结果，因为这是维度大小
+                arraySizeExprs.push_back(parseExpression());
             }
             
             consume(TokenType::RBRACKET, "数组维度必须以 ']' 结束");
@@ -1268,7 +1427,10 @@ std::unique_ptr<ASTNode> Parser::parseVariableDefCommon(const std::string& type,
         initializer = parseExpression();
     }
     
-    varDefList->statements.push_back(std::make_unique<VariableDefNode>(type, name, isArray, std::move(arraySizeExpr), std::move(initializer), line, column));
+    // 创建变量定义节点
+    auto varDef = std::make_unique<VariableDefNode>(type, name, isArray, arraySizeExprs.empty() ? nullptr : std::move(arraySizeExprs[0]), std::move(initializer), line, column);
+    varDef->arraySizeExprs = std::move(arraySizeExprs);
+    varDefList->statements.push_back(std::move(varDef));
     
     // 继续解析其他变量定义（用逗号分隔）
     while (match(TokenType::COMMA)) {
@@ -1278,11 +1440,13 @@ std::unique_ptr<ASTNode> Parser::parseVariableDefCommon(const std::string& type,
             throw std::runtime_error("变量定义中意外的token 在第 " + std::to_string(nextVarToken.line) + " 行");
         }
         std::string nextVarName = nextVarToken.value;
+        int nextVarLine = nextVarToken.line;
+        int nextVarColumn = nextVarToken.column;
         advance(); // 消费变量名
         
         // 检查是否有数组声明
         bool nextIsArray = false;
-        std::unique_ptr<ASTNode> nextArraySizeExpr = nullptr;
+        std::vector<std::unique_ptr<ASTNode>> nextArraySizeExprs;
         int nextDimensionCount = 0;
         if (match(TokenType::LBRACKET)) {
             nextIsArray = true;
@@ -1291,13 +1455,13 @@ std::unique_ptr<ASTNode> Parser::parseVariableDefCommon(const std::string& type,
             // 解析数组大小 - 支持动态表达式
             if (match(TokenType::INTEGER_LITERAL)) {
                 // 兼容整数常量
-                nextArraySizeExpr = std::make_unique<LiteralNode>(previous().value, "整数", previous().line, previous().column);
+                nextArraySizeExprs.push_back(std::make_unique<LiteralNode>(previous().value, "整数", previous().line, previous().column));
             } else if (peek().type == TokenType::RBRACKET) {
                 // 空数组
-                nextArraySizeExpr = nullptr;
+                nextArraySizeExprs.push_back(nullptr);
             } else {
                 // 支持动态表达式
-                nextArraySizeExpr = parseExpression();
+                nextArraySizeExprs.push_back(parseExpression());
             }
             
             // 继续解析多维数组
@@ -1309,14 +1473,14 @@ std::unique_ptr<ASTNode> Parser::parseVariableDefCommon(const std::string& type,
                 
                 // 解析维度大小 - 支持动态表达式
                 if (match(TokenType::INTEGER_LITERAL)) {
-                    // 兼容整数常量 - 创建一个LiteralNode而不是转换int
-                    // 这里不需要处理，因为主要是第一维的大小表达式
+                    // 兼容整数常量
+                    nextArraySizeExprs.push_back(std::make_unique<LiteralNode>(previous().value, "整数", previous().line, previous().column));
                 } else if (peek().type == TokenType::RBRACKET) {
                     // 空维度
+                    nextArraySizeExprs.push_back(nullptr);
                 } else {
                     // 支持动态表达式
-                    auto dimExpr = parseExpression();
-                    (void)dimExpr; // 忽略结果，因为这是维度大小
+                    nextArraySizeExprs.push_back(parseExpression());
                 }
                 
                 consume(TokenType::RBRACKET, "数组维度必须以 ']' 结束");
@@ -1329,9 +1493,13 @@ std::unique_ptr<ASTNode> Parser::parseVariableDefCommon(const std::string& type,
             nextInitializer = parseExpression();
         }
         
-        varDefList->statements.push_back(std::make_unique<VariableDefNode>(type, nextVarName, nextIsArray, std::move(nextArraySizeExpr), std::move(nextInitializer), line, column));
+        // 创建变量定义节点
+        auto nextVarDef = std::make_unique<VariableDefNode>(type, nextVarName, nextIsArray, nextArraySizeExprs.empty() ? nullptr : std::move(nextArraySizeExprs[0]), std::move(nextInitializer), nextVarLine, nextVarColumn);
+        nextVarDef->arraySizeExprs = std::move(nextArraySizeExprs);
+        varDefList->statements.push_back(std::move(nextVarDef));
     }
     
+    consume(TokenType::SEMICOLON, "变量定义必须以分号结束");
     return varDefList;
 }
 
@@ -1368,20 +1536,43 @@ std::unique_ptr<ASTNode> Parser::parseCStyleVariableDef() {
         throw std::runtime_error("变量定义必须指定变量名 在第 " + std::to_string(nameToken.line) + " 行");
     }
     std::string name = nameToken.value;
+    int varLine = nameToken.line;
+    int varColumn = nameToken.column;
     advance(); // 消费变量名
     
     // 检查是否有数组声明
     bool isArray = false;
     std::unique_ptr<ASTNode> arraySizeExpr = nullptr;
+    std::vector<std::unique_ptr<ASTNode>> arraySizeExprs;
+    
     if (match(TokenType::LBRACKET)) {
         isArray = true;
-        // 解析数组大小
+        // 解析第一维数组大小
         if (match(TokenType::INTEGER_LITERAL)) {
             arraySizeExpr = std::make_unique<LiteralNode>(previous().value, "整数", previous().line, previous().column);
+            arraySizeExprs.push_back(std::make_unique<LiteralNode>(previous().value, "整数", previous().line, previous().column));
         } else if (peek().type != TokenType::RBRACKET) {
             arraySizeExpr = parseExpression();
+            arraySizeExprs.push_back(parseExpression());
+        } else {
+            // 空维度，默认大小10
+            arraySizeExprs.push_back(std::make_unique<LiteralNode>("10", "整数", line, column));
         }
         consume(TokenType::RBRACKET, "数组定义必须以 ']' 结束");
+        
+        // 支持最多5维数组
+        int dimCount = 1;
+        while (dimCount < 5 && match(TokenType::LBRACKET)) {
+            dimCount++;
+            if (match(TokenType::INTEGER_LITERAL)) {
+                arraySizeExprs.push_back(std::make_unique<LiteralNode>(previous().value, "整数", previous().line, previous().column));
+            } else if (peek().type != TokenType::RBRACKET) {
+                arraySizeExprs.push_back(parseExpression());
+            } else {
+                arraySizeExprs.push_back(std::make_unique<LiteralNode>("10", "整数", line, column));
+            }
+            consume(TokenType::RBRACKET, "数组定义必须以 ']' 结束");
+        }
     }
     
     // 检查是否有赋值
@@ -1392,7 +1583,116 @@ std::unique_ptr<ASTNode> Parser::parseCStyleVariableDef() {
     
     consume(TokenType::SEMICOLON, "变量定义必须以分号结束");
     
-    return std::make_unique<VariableDefNode>(type, name, isArray, std::move(arraySizeExpr), std::move(initializer), line, column);
+    // 创建变量定义节点
+    auto varDef = std::make_unique<VariableDefNode>(type, name, isArray, std::move(arraySizeExpr), std::move(initializer), varLine, varColumn);
+    varDef->arraySizeExprs = std::move(arraySizeExprs);
+    return varDef;
+}
+
+// 类型推断函数：根据表达式推断类型
+std::string Parser::inferExpressionType(ASTNode* expr) {
+    if (!expr) {
+        return "整型";
+    }
+    
+    switch (expr->type) {
+        case NodeType::LITERAL: {
+            LiteralNode* literal = static_cast<LiteralNode*>(expr);
+            std::string literalType = literal->literalType;
+            if (literalType == "整数") {
+                return "整型";
+            } else if (literalType == "小数") {
+                return "小数";
+            } else if (literalType == "字符串") {
+                return "字符串";
+            } else if (literalType == "布尔值") {
+                return "布尔型";
+            } else if (literalType == "字符") {
+                return "字符型";
+            }
+            return "整型";
+        }
+        
+        case NodeType::BINARY_EXPRESSION: {
+            BinaryExpressionNode* binary = static_cast<BinaryExpressionNode*>(expr);
+            std::string leftType = inferExpressionType(binary->left.get());
+            std::string rightType = inferExpressionType(binary->right.get());
+            
+            // 算术运算符：+ - * / % ^
+            if (binary->op == "+" || binary->op == "-" || binary->op == "*" || binary->op == "/" || binary->op == "%" || binary->op == "^") {
+                // 如果有一个操作数是小数，结果就是小数
+                if (leftType == "小数" || rightType == "小数") {
+                    return "小数";
+                }
+                return "整型";
+            }
+            
+            // 比较运算符：== != < <= > >=
+            if (binary->op == "==" || binary->op == "!=" || binary->op == "<" || binary->op == "<=" || binary->op == ">" || binary->op == ">=") {
+                return "布尔型";
+            }
+            
+            // 逻辑运算符：&& ||
+            if (binary->op == "&&" || binary->op == "||") {
+                return "布尔型";
+            }
+            
+            return "整型";
+        }
+        
+        case NodeType::UNARY_EXPRESSION: {
+            UnaryExpressionNode* unary = static_cast<UnaryExpressionNode*>(expr);
+            std::string operandType = inferExpressionType(unary->operand.get());
+            
+            // 逻辑非运算符 !
+            if (unary->op == "!") {
+                return "布尔型";
+            }
+            
+            // 算术运算符 + -
+            return operandType;
+        }
+        
+        case NodeType::IDENTIFIER: {
+            // 对于标识符，暂时无法在解析阶段确定类型
+            // 需要在语义分析阶段通过符号表查找
+            return "整型";
+        }
+        
+        case NodeType::FUNCTION_CALL: {
+            FunctionCallNode* funcCall = static_cast<FunctionCallNode*>(expr);
+            // 对于函数调用，暂时无法在解析阶段确定返回类型
+            // 需要在语义分析阶段通过函数表查找
+            return "整型";
+        }
+        
+        case NodeType::ARRAY_ACCESS: {
+            ArrayAccessNode* arrayAccess = static_cast<ArrayAccessNode*>(expr);
+            // 对于数组访问，暂时无法在解析阶段确定元素类型
+            // 需要在语义分析阶段通过符号表查找
+            return "整型";
+        }
+        
+        case NodeType::STRING_ACCESS: {
+            // 字符串访问返回字符型
+            return "字符型";
+        }
+        
+        case NodeType::STRUCT_MEMBER_ACCESS: {
+            StructMemberAccessNode* memberAccess = static_cast<StructMemberAccessNode*>(expr);
+            // 对于结构体成员访问，暂时无法在解析阶段确定成员类型
+            // 需要在语义分析阶段通过符号表查找
+            return "整型";
+        }
+        
+        case NodeType::SYSTEM_CMD_EXPRESSION: {
+            // 系统命令行表达式返回字符串
+            return "字符串";
+        }
+        
+        default:
+            return "整型";
+    }
 }
 
 // 解析结构体成员访问
@@ -1429,8 +1729,111 @@ std::unique_ptr<ASTNode> Parser::parseImportStatement() {
     consume(TokenType::RPAREN, "导入语句必须以 ')' 结束");
     consume(TokenType::SEMICOLON, "导入语句必须以分号结束");
     
-    // 调试信息
-    std::cout << "解析导入语句: " << filePath << " 在第 " << line << " 行" << std::endl;
+    debugOutput("解析导入语句: " + filePath + " 在第 " + std::to_string(line) + " 行");
     
     return std::make_unique<ImportStatementNode>(filePath, line, column);
+}
+
+std::unique_ptr<ASTNode> Parser::parseBreakStatement() {
+    int line = previous().line;
+    int column = previous().column;
+    
+    consume(TokenType::SEMICOLON, "退出循环语句必须以分号结束");
+    
+    return std::make_unique<BreakStatementNode>(line, column);
+}
+
+std::unique_ptr<ASTNode> Parser::parseContinueStatement() {
+    int line = previous().line;
+    int column = previous().column;
+    
+    consume(TokenType::SEMICOLON, "下一层循环语句必须以分号结束");
+    
+    return std::make_unique<ContinueStatementNode>(line, column);
+}
+
+void Parser::setDebugMode(bool mode) {
+    debugMode = mode;
+}
+
+void Parser::debugOutput(const std::string& message) {
+    if (debugMode) {
+        std::cout << "[解析器调试] " << message << std::endl;
+    }
+}
+
+// 解析大括号初始化列表
+std::unique_ptr<ASTNode> Parser::parseBraceInitList() {
+    // 检查是否需要消费左大括号
+    bool consumedLBrace = false;
+    int line, column;
+    
+    if (peek().type == TokenType::LBRACE) {
+        // 如果当前 token 是左大括号，消费它
+        advance();
+        consumedLBrace = true;
+    }
+    
+    // 使用刚刚消费的左大括号的位置信息，如果没有则使用 previous()
+    if (consumedLBrace) {
+        line = previous().line;
+        column = previous().column;
+    } else {
+        line = previous().line;
+        column = previous().column;
+    }
+    
+    std::vector<std::unique_ptr<ASTNode>> elements;
+    
+    // 解析元素直到遇到右大括号
+    while (!isAtEnd() && peek().type != TokenType::RBRACE) {
+        // 解析一个元素
+        if (peek().type == TokenType::LBRACE) {
+            // 嵌套的大括号初始化列表 - 消费左大括号后再递归调用
+            advance();
+            elements.push_back(parseBraceInitList());
+        } else {
+            // 基本类型字面量或标识符
+            if (peek().type == TokenType::INTEGER_LITERAL) {
+                advance();
+                elements.push_back(std::make_unique<LiteralNode>(previous().value, "整型", line, column));
+            } else if (peek().type == TokenType::STRING_LITERAL) {
+                advance();
+                elements.push_back(std::make_unique<LiteralNode>(previous().value, "字符串", line, column));
+            } else if (peek().type == TokenType::BOOLEAN_LITERAL) {
+                advance();
+                elements.push_back(std::make_unique<LiteralNode>(previous().value, "布尔型", line, column));
+            } else if (peek().type == TokenType::CHAR_LITERAL) {
+                advance();
+                elements.push_back(std::make_unique<LiteralNode>(previous().value, "字符型", line, column));
+            } else if (peek().type == TokenType::IDENTIFIER) {
+                advance();
+                elements.push_back(std::make_unique<IdentifierNode>(previous().value, line, column));
+            } else {
+                // 其他表达式
+                elements.push_back(parseExpression());
+            }
+        }
+        
+        // 消费逗号（如果有）
+        if (peek().type == TokenType::COMMA) {
+            advance(); // 消费逗号
+            // 如果下一个是右大括号，说明有空元素，跳出循环
+            if (peek().type == TokenType::RBRACE) {
+                break;
+            }
+            // 否则继续解析下一个元素
+        }
+    }
+    
+    // 消费右大括号
+    if (isAtEnd()) {
+        throw std::runtime_error("大括号初始化列表不完整 在第 " + std::to_string(line) + " 行");
+    }
+    if (peek().type != TokenType::RBRACE) {
+        throw std::runtime_error("大括号初始化列表必须以 '}' 结束 在第 " + std::to_string(line) + " 行");
+    }
+    advance(); // 消费右大括号
+    
+    return std::make_unique<BraceInitListNode>(std::move(elements), line, column);
 }

@@ -2,6 +2,7 @@
 #include <string>
 #include <sstream>
 #include <unordered_set>
+#include <vector>
 
 // CH 代码格式化工具类
 class CHFormatter {
@@ -31,6 +32,7 @@ private:
     void processFormatting(std::string& code);
     void applyIndentation(std::string& code);
     void trim(std::string& str);
+    std::vector<std::string> splitLines(const std::string& str);
     bool isNewline(char c) const;
     bool isQuote(char c) const;
     bool isWhitespace(char c) const;

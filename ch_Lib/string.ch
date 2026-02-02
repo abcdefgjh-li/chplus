@@ -22,8 +22,23 @@
         返回 "";
     }
     
-    // 使用内置子串函数
-    返回 子串(str, start, length);
+    // 使用内置字符串处理功能
+    如果 (start >= 长度(str)) {
+        返回 "";
+    }
+    
+    定义(整型) end = start + length;
+    如果 (end > 长度(str)) {
+        end = 长度(str);
+    }
+    
+    定义(字符串) result = "";
+    定义(整型) i;
+    对于 (i = start; i < end; i = i + 1) {
+        result = 字符串拼接(result, 字符串拼接(子串(str, i, 1), ""));
+    }
+    
+    返回 result;
 }
 
 // 字符串查找

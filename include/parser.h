@@ -14,6 +14,7 @@ enum class NodeType {
     FUNCTION_CALL,       // 函数调用
     RETURN_STATEMENT,    // 返回语句
     ASSIGNMENT,          // 赋值表达式
+    COMPOUND_ASSIGNMENT, // 复合赋值表达式
     ARRAY_ASSIGNMENT,    // 数组访问赋值
     BINARY_EXPRESSION,   // 二元表达式
     UNARY_EXPRESSION,    // 一元表达式
@@ -27,8 +28,11 @@ enum class NodeType {
     ELSE_STATEMENT,      // else语句
     COUT_STATEMENT,      // 控制台输出语句
     CIN_STATEMENT,       // 控制台输入语句
+    COUT_NEWLINE_STATEMENT, // 控制台换行语句
     WHILE_STATEMENT,     // while循环语句
     FOR_STATEMENT,       // for循环语句
+    BREAK_STATEMENT,     // 退出循环语句
+    CONTINUE_STATEMENT,  // 下一层循环语句
     FILE_READ_STATEMENT,  // 文件读取语句
     FILE_WRITE_STATEMENT, // 文件写入语句
     FILE_APPEND_STATEMENT, // 文件追加语句
@@ -37,7 +41,8 @@ enum class NodeType {
     SYSTEM_CMD_EXPRESSION, // 系统命令行表达式
     STRUCT_DEF,          // 结构体定义
     STRUCT_MEMBER_ACCESS, // 结构体成员访问
-    STRUCT_MEMBER_ASSIGNMENT // 结构体成员赋值
+    STRUCT_MEMBER_ASSIGNMENT, // 结构体成员赋值
+    BRACE_INIT_LIST      // 大括号初始化列表
 };
 
 // 语法节点基类
@@ -68,7 +73,8 @@ public:
     std::string type;
     std::string name;
     bool isArray;
-    std::unique_ptr<ASTNode> arraySizeExpr; // 支持动态数组大小表达式
+    std::unique_ptr<ASTNode> arraySizeExpr; // 支持动态数组大小表达式（仅第一维）
+    std::vector<std::unique_ptr<ASTNode>> arraySizeExprs; // 支持多维数组大小表达式（最多5维）
     std::unique_ptr<ASTNode> initializer;
     
     VariableDefNode(const std::string& type, const std::string& name, bool isArray, std::unique_ptr<ASTNode> arraySizeExpr, std::unique_ptr<ASTNode> initializer, int line, int column)
@@ -102,6 +108,17 @@ public:
     
     AssignmentNode(const std::string& name, std::unique_ptr<ASTNode> expression, int line, int column)
         : ASTNode(NodeType::ASSIGNMENT, line, column), name(name), expression(std::move(expression)) {}
+};
+
+// 复合赋值表达式节点
+class CompoundAssignmentNode : public ASTNode {
+public:
+    std::string name;
+    std::string op;  // 运算符: "+", "-", "*", "/", "%", "^"
+    std::unique_ptr<ASTNode> expression;
+    
+    CompoundAssignmentNode(const std::string& name, const std::string& op, std::unique_ptr<ASTNode> expression, int line, int column)
+        : ASTNode(NodeType::COMPOUND_ASSIGNMENT, line, column), name(name), op(op), expression(std::move(expression)) {}
 };
 
 // 函数调用节点
@@ -235,19 +252,26 @@ public:
 // 控制台输出语句节点
 class CoutStatementNode : public ASTNode {
 public:
-    std::unique_ptr<ASTNode> expression;
+    std::vector<std::unique_ptr<ASTNode>> expressions;
     
-    CoutStatementNode(std::unique_ptr<ASTNode> expression, int line, int column)
-        : ASTNode(NodeType::COUT_STATEMENT, line, column), expression(std::move(expression)) {}
+    CoutStatementNode(std::vector<std::unique_ptr<ASTNode>> expressions, int line, int column)
+        : ASTNode(NodeType::COUT_STATEMENT, line, column), expressions(std::move(expressions)) {}
 };
 
 // 控制台输入语句节点
 class CinStatementNode : public ASTNode {
 public:
-    std::unique_ptr<ASTNode> expression;
+    std::vector<std::unique_ptr<ASTNode>> expressions;
     
-    CinStatementNode(std::unique_ptr<ASTNode> expression, int line, int column)
-        : ASTNode(NodeType::CIN_STATEMENT, line, column), expression(std::move(expression)) {}
+    CinStatementNode(std::vector<std::unique_ptr<ASTNode>> expressions, int line, int column)
+        : ASTNode(NodeType::CIN_STATEMENT, line, column), expressions(std::move(expressions)) {}
+};
+
+// 控制台换行语句节点
+class CoutNewlineStatementNode : public ASTNode {
+public:
+    CoutNewlineStatementNode(int line, int column)
+        : ASTNode(NodeType::COUT_NEWLINE_STATEMENT, line, column) {}
 };
 
 // While循环语句节点
@@ -273,6 +297,20 @@ public:
         : ASTNode(NodeType::FOR_STATEMENT, line, column), 
           initialization(std::move(initialization)), condition(std::move(condition)), 
           update(std::move(update)), body(std::move(body)) {}
+};
+
+// 退出循环语句节点
+class BreakStatementNode : public ASTNode {
+public:
+    BreakStatementNode(int line, int column)
+        : ASTNode(NodeType::BREAK_STATEMENT, line, column) {}
+};
+
+// 下一层循环语句节点
+class ContinueStatementNode : public ASTNode {
+public:
+    ContinueStatementNode(int line, int column)
+        : ASTNode(NodeType::CONTINUE_STATEMENT, line, column) {}
 };
 
 // If语句节点
@@ -366,11 +404,21 @@ public:
           structExpr(std::move(structExpr)), memberName(memberName), expression(std::move(expression)) {}
 };
 
+// 大括号初始化列表节点
+class BraceInitListNode : public ASTNode {
+public:
+    std::vector<std::unique_ptr<ASTNode>> elements;
+    
+    BraceInitListNode(std::vector<std::unique_ptr<ASTNode>> elements, int line, int column)
+        : ASTNode(NodeType::BRACE_INIT_LIST, line, column), elements(std::move(elements)) {}
+};
+
 // 语法分析器类
 class Parser {
 private:
     std::vector<Token> tokens;
     size_t current;
+    bool debugMode;
     
     bool match(TokenType type);
     bool match(const std::vector<TokenType>& types);
@@ -396,6 +444,7 @@ private:
     std::unique_ptr<ASTNode> parseStatementList();
     std::unique_ptr<ASTNode> parseCoutStatement();
     std::unique_ptr<ASTNode> parseCinStatement();
+    std::unique_ptr<ASTNode> parseCoutNewlineStatement();
     std::unique_ptr<ASTNode> parseWhileStatement();
     std::unique_ptr<ASTNode> parseForStatement();
     std::unique_ptr<ASTNode> parseIfStatement();
@@ -405,11 +454,14 @@ private:
     std::unique_ptr<ASTNode> parseFileWriteStatement();
     std::unique_ptr<ASTNode> parseFileAppendStatement();
     std::unique_ptr<ASTNode> parseImportStatement();
+    std::unique_ptr<ASTNode> parseBreakStatement();
+    std::unique_ptr<ASTNode> parseContinueStatement();
     std::unique_ptr<ASTNode> parseSystemCmdStatement();
     std::unique_ptr<ASTNode> parseSystemCmdExpression();
     std::unique_ptr<ASTNode> parseStructDef();
     std::unique_ptr<ASTNode> parseStructMemberAccess();
     std::unique_ptr<ASTNode> parseArrayAccess(const std::string& arrayName);
+    std::unique_ptr<ASTNode> parseBraceInitList();
     
 public:
     Parser(const std::vector<Token>& tokens);
@@ -418,12 +470,21 @@ public:
     // 公开的函数，用于导入文件时解析程序
     std::unique_ptr<ProgramNode> parseProgram();
     
+    // 调试模式设置
+    void setDebugMode(bool mode);
+    
     // 内部解析函数声明
     std::unique_ptr<ASTNode> parseDefinition();
     std::unique_ptr<ASTNode> parseStructDefinition(int line, int column);
     std::unique_ptr<ASTNode> parseFunctionDefCommon(const std::string& type, const std::string& name, int line, int column);
     std::unique_ptr<ASTNode> parseVariableDefCommon(const std::string& type, const std::string& name, int line, int column);
     std::unique_ptr<ASTNode> parseCStyleVariableDef();
+    
+    // 类型推断函数
+    std::string inferExpressionType(ASTNode* expr);
+    
+    // 调试输出函数
+    void debugOutput(const std::string& message);
 };
 
 #endif // PARSER_H

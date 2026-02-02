@@ -15,6 +15,9 @@ static std::map<std::string, TokenType> keywords = {
     {"否则如果", TokenType::ELSE_IF},
     {"控制台输出", TokenType::COUT},
     {"控制台输入", TokenType::CIN},
+    {"控制台换行", TokenType::COUT_NEWLINE},
+    {"输出", TokenType::COUT},
+    {"输入", TokenType::CIN},
     {"小数", TokenType::DOUBLE},
     {"布尔型", TokenType::BOOLEAN},
     {"真", TokenType::BOOLEAN_LITERAL},
@@ -22,6 +25,8 @@ static std::map<std::string, TokenType> keywords = {
     {"结构体", TokenType::STRUCT},
     {"当", TokenType::WHILE},
     {"对于", TokenType::FOR},
+    {"退出循环", TokenType::BREAK},
+    {"下一层循环", TokenType::CONTINUE},
     {"返回", TokenType::RETURN},
     {"文件读取", TokenType::FILE_READ},
     {"文件写入", TokenType::FILE_WRITE},
@@ -303,24 +308,64 @@ std::vector<Token> Lexer::tokenize() {
             }
         }
         else if (c == '+') {
-            tokens.push_back(Token(TokenType::PLUS, "+", line, column));
             advance();
+            if (position < source.length() && source[position] == '+') {
+                tokens.push_back(Token(TokenType::INCREMENT, "++", line, column));
+                advance();
+            } else if (position < source.length() && source[position] == '=') {
+                tokens.push_back(Token(TokenType::COMPOUND_ADD, "+=", line, column));
+                advance();
+            } else {
+                tokens.push_back(Token(TokenType::PLUS, "+", line, column));
+            }
         }
         else if (c == '-') {
-            tokens.push_back(Token(TokenType::MINUS, "-", line, column));
             advance();
+            if (position < source.length() && source[position] == '-') {
+                tokens.push_back(Token(TokenType::DECREMENT, "--", line, column));
+                advance();
+            } else if (position < source.length() && source[position] == '=') {
+                tokens.push_back(Token(TokenType::COMPOUND_SUB, "-=", line, column));
+                advance();
+            } else {
+                tokens.push_back(Token(TokenType::MINUS, "-", line, column));
+            }
         }
         else if (c == '*') {
-            tokens.push_back(Token(TokenType::MULTIPLY, "*", line, column));
             advance();
+            if (position < source.length() && source[position] == '=') {
+                tokens.push_back(Token(TokenType::COMPOUND_MUL, "*=", line, column));
+                advance();
+            } else {
+                tokens.push_back(Token(TokenType::MULTIPLY, "*", line, column));
+            }
+        }
+        else if (c == '/') {
+            advance();
+            if (position < source.length() && source[position] == '=') {
+                tokens.push_back(Token(TokenType::COMPOUND_DIV, "/=", line, column));
+                advance();
+            } else {
+                tokens.push_back(Token(TokenType::DIVIDE, "/", line, column));
+            }
         }
         else if (c == '^') {
-            tokens.push_back(Token(TokenType::POWER, "^", line, column));
             advance();
+            if (position < source.length() && source[position] == '=') {
+                tokens.push_back(Token(TokenType::COMPOUND_POW, " ^=", line, column));
+                advance();
+            } else {
+                tokens.push_back(Token(TokenType::POWER, "^", line, column));
+            }
         }
         else if (c == '%') {
-            tokens.push_back(Token(TokenType::MODULO, "%", line, column));
             advance();
+            if (position < source.length() && source[position] == '=') {
+                tokens.push_back(Token(TokenType::COMPOUND_MOD, " %=", line, column));
+                advance();
+            } else {
+                tokens.push_back(Token(TokenType::MODULO, "%", line, column));
+            }
         }
         else if (c == '/') {
             // 检查是否是注释

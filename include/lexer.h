@@ -19,12 +19,15 @@ enum class TokenType {
     ELSE_IF,         // 否则如果
     COUT,            // 控制台输出
     CIN,             // 控制台输入
+    COUT_NEWLINE,    // 控制台换行
     DOUBLE,          // 小数
     BOOLEAN,         // 布尔型
     STRUCT,          // 结构体
     ARRAY,           // 数组
     WHILE,           // 当（循环）
     FOR,             // 对于（循环）
+    BREAK,           // 退出循环
+    CONTINUE,        // 下一层循环
     RETURN,          // 返回
     
     // 文件操作关键字
@@ -68,6 +71,18 @@ enum class TokenType {
     GREATER_EQUAL,   // >=
     EQUAL,           // ==
     NOT_EQUAL,       // !=
+    
+    // 复合赋值运算符
+    COMPOUND_ADD,    // +=
+    COMPOUND_SUB,    // -=
+    COMPOUND_MUL,    // *=
+    COMPOUND_DIV,    // /=
+    COMPOUND_MOD,    // %=
+    COMPOUND_POW,    // ^=
+    
+    // 自增自减运算符
+    INCREMENT,       // ++
+    DECREMENT,       // --
     
     // 分隔符
     LPAREN,          // (
@@ -159,6 +174,10 @@ struct Token {
                 break;
             case TokenType::FOR: std::cout << "FOR";
                 break;
+            case TokenType::BREAK: std::cout << "BREAK";
+                break;
+            case TokenType::CONTINUE: std::cout << "CONTINUE";
+                break;
             case TokenType::RETURN: std::cout << "RETURN";
                 break;
             case TokenType::FILE_READ: std::cout << "FILE_READ";
@@ -182,6 +201,22 @@ struct Token {
             case TokenType::EQUAL: std::cout << "EQUAL";
                 break;
             case TokenType::NOT_EQUAL: std::cout << "NOT_EQUAL";
+                break;
+            case TokenType::COMPOUND_ADD: std::cout << "COMPOUND_ADD";
+                break;
+            case TokenType::COMPOUND_SUB: std::cout << "COMPOUND_SUB";
+                break;
+            case TokenType::COMPOUND_MUL: std::cout << "COMPOUND_MUL";
+                break;
+            case TokenType::COMPOUND_DIV: std::cout << "COMPOUND_DIV";
+                break;
+            case TokenType::COMPOUND_MOD: std::cout << "COMPOUND_MOD";
+                break;
+            case TokenType::COMPOUND_POW: std::cout << "COMPOUND_POW";
+                break;
+            case TokenType::INCREMENT: std::cout << "INCREMENT";
+                break;
+            case TokenType::DECREMENT: std::cout << "DECREMENT";
                 break;
             case TokenType::LOGICAL_AND: std::cout << "LOGICAL_AND";
                 break;

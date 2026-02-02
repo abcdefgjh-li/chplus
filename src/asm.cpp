@@ -513,61 +513,59 @@ std::string HexAsmParser::generateAssignmentAsm(AssignmentNode* node) {
 std::string HexAsmParser::generateCoutAsm(CoutStatementNode* node) {
     std::stringstream asmCode;
     
-    if (!node->expression) {
-        return asmCode.str();
-    }
-    
-    auto expr = node->expression.get();
-    
-    // 处理不同类型的表达式
-    if (expr->type == NodeType::LITERAL) {
-        auto literal = static_cast<LiteralNode*>(expr);
-        if (literal->literalType == "字符串") {
-            // 输出字符串
-            std::string str = literal->value;
-            for (char c : str) {
+    for (const auto& expr : node->expressions) {
+        auto exprPtr = expr.get();
+        
+        // 处理不同类型的表达式
+        if (exprPtr->type == NodeType::LITERAL) {
+            auto literal = static_cast<LiteralNode*>(exprPtr);
+            if (literal->literalType == "字符串") {
+                // 输出字符串
+                std::string str = literal->value;
+                for (char c : str) {
+                    asmCode << "LOAD AX 0x01\n";
+                    asmCode << "LOAD BX 0x" << std::hex << static_cast<int>(static_cast<unsigned char>(c)) << std::dec << "\n";
+                    asmCode << "CALL 0x01\n";
+                }
+            } else if (literal->literalType == "整型") {
+                // 输出整数
+                int value = std::stoi(literal->value);
+                asmCode << generateIntegerOutput(value);
+            } else if (literal->literalType == "小数") {
+                // 输出小数
+                double value = std::stod(literal->value);
+                asmCode << generateFloatOutput(value);
+            } else if (literal->literalType == "布尔型") {
+                // 输出布尔值
+                bool value = (literal->value == "真");
+                asmCode << generateBooleanOutput(value);
+            } else if (literal->literalType == "字符型") {
+                // 输出字符
+                char c = literal->value.empty() ? '\0' : literal->value[0];
                 asmCode << "LOAD AX 0x01\n";
                 asmCode << "LOAD BX 0x" << std::hex << static_cast<int>(static_cast<unsigned char>(c)) << std::dec << "\n";
                 asmCode << "CALL 0x01\n";
             }
-        } else if (literal->literalType == "整型") {
-            // 输出整数
-            int value = std::stoi(literal->value);
-            asmCode << generateIntegerOutput(value);
-        } else if (literal->literalType == "小数") {
-            // 输出小数
-            double value = std::stod(literal->value);
-            asmCode << generateFloatOutput(value);
-        } else if (literal->literalType == "布尔型") {
-            // 输出布尔值
-            bool value = (literal->value == "真");
-            asmCode << generateBooleanOutput(value);
-        } else if (literal->literalType == "字符型") {
-            // 输出字符
-            char c = literal->value.empty() ? '\0' : literal->value[0];
-            asmCode << "LOAD AX 0x01\n";
-            asmCode << "LOAD BX 0x" << std::hex << static_cast<int>(static_cast<unsigned char>(c)) << std::dec << "\n";
+        } else if (exprPtr->type == NodeType::IDENTIFIER) {
+            // 输出变量值
+            auto identifier = static_cast<IdentifierNode*>(exprPtr);
+            std::string varReg = getVariableRegister(identifier->name);
+            asmCode << "LOAD AX 0x02\n";
+            asmCode << "MOVE BX " << varReg << "\n";
+            asmCode << "CALL 0x01\n";
+        } else if (exprPtr->type == NodeType::BINARY_EXPRESSION) {
+            // 输出表达式结果
+            std::string resultReg = evaluateExpression(exprPtr, asmCode);
+            asmCode << "LOAD AX 0x02\n";
+            asmCode << "MOVE BX " << resultReg << "\n";
+            asmCode << "CALL 0x01\n";
+        } else if (exprPtr->type == NodeType::FUNCTION_CALL) {
+            // 输出函数调用结果
+            std::string resultReg = evaluateExpression(exprPtr, asmCode);
+            asmCode << "LOAD AX 0x02\n";
+            asmCode << "MOVE BX " << resultReg << "\n";
             asmCode << "CALL 0x01\n";
         }
-    } else if (expr->type == NodeType::IDENTIFIER) {
-        // 输出变量值
-        auto identifier = static_cast<IdentifierNode*>(expr);
-        std::string varReg = getVariableRegister(identifier->name);
-        asmCode << "LOAD AX 0x02\n";
-        asmCode << "MOVE BX " << varReg << "\n";
-        asmCode << "CALL 0x01\n";
-    } else if (expr->type == NodeType::BINARY_EXPRESSION) {
-        // 输出表达式结果
-        std::string resultReg = evaluateExpression(expr, asmCode);
-        asmCode << "LOAD AX 0x02\n";
-        asmCode << "MOVE BX " << resultReg << "\n";
-        asmCode << "CALL 0x01\n";
-    } else if (expr->type == NodeType::FUNCTION_CALL) {
-        // 输出函数调用结果
-        std::string resultReg = evaluateExpression(expr, asmCode);
-        asmCode << "LOAD AX 0x02\n";
-        asmCode << "MOVE BX " << resultReg << "\n";
-        asmCode << "CALL 0x01\n";
     }
     
     // 输出换行符

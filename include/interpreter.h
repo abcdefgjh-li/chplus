@@ -53,6 +53,8 @@ public:
     SymbolTable* enterScope();
     SymbolTable* getParent() const;
     bool isGlobalScope() const;
+    
+    void defineVariable(const std::string& name, const std::string& type, const std::string& value, int line, bool initArrayElements = true);
 };
 
 // 执行器
