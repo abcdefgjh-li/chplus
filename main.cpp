@@ -1,8 +1,7 @@
-#include "include/lexer.h"
-#include "include/parser.h"
-#include "include/interpreter.h"
-#include "include/CHFormatter.h"
-#include "include/asm.h"
+#include "core/lexer.h"
+#include "core/parser.h"
+#include "core/interpreter.h"
+#include "core/CHFormatter.h"
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -11,6 +10,10 @@
 #include <locale>
 #include <unordered_set>
 #include <map>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 // 函数声明
 void setChineseLocale();
@@ -37,7 +40,7 @@ void setChineseLocale() {
     
     // 只在Windows系统上设置控制台编码为UTF-8
 #ifdef _WIN32
-    system("chcp 65001 >nul 2>&1");
+    SetConsoleOutputCP(65001);
 #endif
 }
 
@@ -87,10 +90,10 @@ int main(int argc, char* argv[]) {
     bool noFormat = false;
     bool autoFormat = false; // -a 参数
     bool debugMode = false;  // -d 参数
-    bool compileToHex = false; // -x 参数：编译为16进制汇编二进制文件
-    bool executeHex = false; // -r 参数：执行16进制汇编二进制文件
+    bool useFileMemory = false; // -t 参数
+    bool useMemoryStorage = false; // -t memory 参数
+    bool reserveMemory = false; // -t reserve 参数
     std::string filename;
-    std::string outputFile;
     
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
@@ -100,13 +103,23 @@ int main(int argc, char* argv[]) {
             autoFormat = true;
         } else if (arg == "-d") {
             debugMode = true;
-        } else if (arg == "-x") {
-            compileToHex = true;
-            if (i + 1 < argc && argv[i + 1][0] != '-') {
-                outputFile = argv[++i];
+        } else if (arg == "-t") {
+            // 检查下一个参数
+            if (i + 1 < argc) {
+                std::string nextArg = argv[i + 1];
+                if (nextArg == "reserve") {
+                    useFileMemory = true;
+                    reserveMemory = true;
+                    i++; // 跳过 "reserve" 参数
+                } else if (nextArg == "memory") {
+                    useMemoryStorage = true;
+                    i++; // 跳过 "memory" 参数
+                } else {
+                    useFileMemory = true;
+                }
+            } else {
+                useFileMemory = true;
             }
-        } else if (arg == "-r") {
-            executeHex = true;
         } else if (arg.substr(0, 1) != "-") {
             filename = arg;
         } else if (arg == "--help" || arg == "-h") {
@@ -114,8 +127,9 @@ int main(int argc, char* argv[]) {
             std::cout << "选项:" << std::endl;
             std::cout << "  -a               自动格式化并覆盖原文件" << std::endl;
             std::cout << "  -d               启用调试模式，显示详细执行信息" << std::endl;
-            std::cout << "  -x <输出文件>    编译为16进制汇编二进制文件" << std::endl;
-            std::cout << "  -r               执行16进制汇编二进制文件" << std::endl;
+            std::cout << "  -t               使用文件内存存储（memory.txt），执行后删除" << std::endl;
+            std::cout << "  -t reserve       使用文件内存存储（memory.txt），执行后保留" << std::endl;
+            std::cout << "  -t memory        使用纯内存存储，不生成txt文件，支持大数组" << std::endl;
             std::cout << "  --no-format, -n 不自动格式化代码" << std::endl;
             std::cout << "  --help, -h      显示帮助信息" << std::endl;
             return 0;
@@ -136,52 +150,15 @@ int main(int argc, char* argv[]) {
     
     std::string extension = filename.substr(filename.length() - 3);
     
-    // 执行16进制汇编二进制文件
-    if (executeHex) {
-        if (extension != "hex" && extension != "bin" && extension != "chexbin") {
-            std::cerr << "错误: -r 参数需要 .hex、.bin 或 .chexbin 文件" << std::endl;
-            return 1;
-        }
-        
-        try {
-            HexAsmParser asmParser;
-            if (!asmParser.parseAndExecuteHexBinary(filename)) {
-                std::cerr << "执行失败: " << asmParser.getError() << std::endl;
-                return 1;
-            }
-            return 0;
-        } catch (const std::exception& e) {
-            std::cerr << "错误: " << e.what() << std::endl;
-            return 1;
-        }
-    }
-    
     // 检查是否为.ch文件
     if (extension != ".ch") {
-        std::cerr << "错误: 只支持 .ch 文件（或使用 -r 参数执行16进制文件）" << std::endl;
+        std::cerr << "错误: 只支持 .ch 文件" << std::endl;
         return 1;
     }
     
     try {
         // 读取文件内容
         std::string code = readFile(filename);
-        
-        // 编译为16进制汇编二进制文件
-        if (compileToHex) {
-            if (outputFile.empty()) {
-                // 如果没有指定输出文件，使用默认名称
-                outputFile = filename.substr(0, filename.length() - 3) + ".hexbin";
-            }
-            
-            HexAsmParser asmParser;
-            if (asmParser.compileCHToHexBinary(code, outputFile)) {
-                std::cout << "成功编译为16进制汇编二进制文件: " << outputFile << std::endl;
-            } else {
-                std::cerr << "编译失败: " << asmParser.getError() << std::endl;
-                return 1;
-            }
-            return 0;
-        }
         
         // 自动格式化并覆盖原文件
         if (autoFormat) {
@@ -208,7 +185,7 @@ int main(int argc, char* argv[]) {
         auto program = parser.parse();
         
         // 执行
-        Interpreter interpreter(std::move(program), debugMode);
+        Interpreter interpreter(std::move(program), debugMode, useFileMemory, useMemoryStorage, reserveMemory);
         
         // 检查是否是标准库文件（不包含主函数的文件）
         bool hasMainFunction = false;

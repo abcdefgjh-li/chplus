@@ -9,17 +9,10 @@ LOCAL_MODULE := chplus
 LOCAL_CPPFLAGS := -std=c++17
 
 # 包含路径
-LOCAL_C_INCLUDES := $(LOCAL_PATH)/../include
+LOCAL_C_INCLUDES := $(LOCAL_PATH)/../core
 
 # 源文件列表
-LOCAL_SRC_FILES := \
-    ../main.cpp \
-    ../src/lexer.cpp \
-    ../src/parser.cpp \
-    ../src/interpreter.cpp \
-    ../src/CodeFormatter.cpp \
-    ../src/CHFormatter.cpp \
-    ../src/asm.cpp
+LOCAL_SRC_FILES := $(wildcard ../*.cpp ../core/*.cpp)
 
 # 静态库依赖
 LOCAL_STATIC_LIBRARIES := 
